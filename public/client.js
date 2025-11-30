@@ -142,7 +142,7 @@ socket.on('room:pointsEarned', ({ player, points, linesCompleted }) => {
 
 socket.on('room:gameEnded', ({ winner, loser, winners: winnerList }) => {
   if (loser) {
-    setStatus(`Game Over! ${loser} is the loser.`, false);
+    setStatus(`Game Over! .`, false);
   } else if (winner) {
     // This might be a legacy event or single winner case, but we handle multi-winner via room:playerWon
     setStatus(`${winner} finished!`, false);
