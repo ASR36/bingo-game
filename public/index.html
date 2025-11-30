@@ -80,14 +80,96 @@
         <button id="start-game" disabled>Start Round</button>
         <button id="reset-after-game" class="secondary" disabled style="display: none;">Reset Game</button>
       </div>
-      <div class="card-container">
-        <div id="bingo-card" class="card"></div>
-      </div>
-    </section>
-  </main>
+      <!doctype html>
+      <html lang="en">
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="client.js" type="module"></script>
-</body>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Bingo</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="styles.css" />
+      </head>
 
-</html>
+      <body>
+        <main class="app">
+          <section class="panel panel--left">
+            <h1>Bingo</h1>
+
+            <div class="form">
+              <label>
+                Display Name
+                <input id="player-name" maxlength="20" placeholder="Enter your name" />
+              </label>
+              <label>
+                Room Code
+                <input id="room-code" placeholder="Enter code (e.g. ABCD)" maxlength="6" />
+              </label>
+              <div class="actions">
+                <button id="create-room">Create Room</button>
+                <button id="join-room" class="secondary">Join Room</button>
+              </div>
+              <p id="status" class="status"></p>
+            </div>
+
+            <div class="panel__section">
+              <h2>Game Settings</h2>
+              <label>
+                Board Size
+                <select id="board-size" class="board-size-select">
+                  <option value="5">5 × 5 (Standard)</option>
+                  <option value="6">6 × 6 (Large)</option>
+                  <option value="10">10 × 10 (Epic)</option>
+                </select>
+              </label>
+              <p class="hint" style="margin-top: 0.5rem;">Only the host can change size while waiting.</p>
+            </div>
+
+            <div class="panel__section" id="room-info">
+              <h2>Room Info</h2>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.9rem;">
+                <p>Code: <strong id="info-code" style="color: var(--primary-color)">—</strong></p>
+                <p>Status: <strong id="info-status">Not connected</strong></p>
+                <p>Host: <strong id="info-host">—</strong></p>
+                <p>Size: <strong id="info-board-size">5 × 5</strong></p>
+              </div>
+              <p id="turn-indicator" class="turn-indicator"></p>
+            </div>
+
+            <div class="panel__section">
+              <h2>Leaderboard</h2>
+              <ol id="winners" class="winners"></ol>
+              <div id="loser-section" style="display: none; margin-top: 0.5rem;">
+                <p id="loser-name" class="loser-name" style="color: var(--danger-color); font-weight: bold;"></p>
+              </div>
+            </div>
+
+            <div class="panel__section">
+              <h2>Players</h2>
+              <ul id="players" class="player-list"></ul>
+            </div>
+
+            <div class="panel__section">
+              <h2>Called Numbers</h2>
+              <div id="called-numbers" class="number-grid"></div>
+            </div>
+          </section>
+
+          <section class="panel panel--right">
+            <div class="controls">
+              <button id="start-game" disabled>Start Round</button>
+              <button id="reset-after-game" class="secondary" disabled style="display: none;">Reset Game</button>
+            </div>
+            <div class="card-container">
+              <div id="bingo-card" class="card"></div>
+            </div>
+          </section>
+        </main>
+
+        <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+        <script src="client.js" type="module"></script>
+      </body>
+
+      </html>
