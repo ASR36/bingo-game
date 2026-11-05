@@ -30,6 +30,7 @@ const elements = {
   chatClose: document.getElementById('chat-close'),
   chatBadge: document.getElementById('chat-badge'),
   chatBackdrop: document.getElementById('chat-backdrop'),
+  chatTyping: document.getElementById('chat-typing'),
 };
 
 const state = {
@@ -188,8 +189,86 @@ socket.on('chat:history', (messages) => {
   renderChat();
 });
 
+/* ----- Typing indicator ----- */
+const TYPING_IDLE_MS = 3000;     // stop "typing" after this long without keystrokes
+const TYPING_RESEND_MS = 2000;   // re-announce at most this often while typing
+const TYPING_EXPIRE_MS = 5000;   // drop a remote typer if we stop hearing from them
+const typingUsers = new Map();   // playerId -> { name, timer }
+let typingSelf = { active: false, lastSent: 0, idleTimer: null };
+
+socket.on('chat:typing', ({ playerId, name, typing } = {}) => {
+  if (!playerId || playerId === state.playerId) return;
+  clearTimeout(typingUsers.get(playerId)?.timer);
+  if (typing) {
+    const timer = setTimeout(() => {
+      typingUsers.delete(playerId);
+      renderTyping();
+    }, TYPING_EXPIRE_MS);
+    typingUsers.set(playerId, { name, timer });
+  } else {
+    typingUsers.delete(playerId);
+  }
+  renderTyping();
+});
+
+function emitTyping(typing) {
+  if (!state.room || !socket.connected) return;
+  socket.emit('chat:typing', { roomCode: state.room.code, typing });
+}
+
+function stopTyping() {
+  clearTimeout(typingSelf.idleTimer);
+  if (typingSelf.active) emitTyping(false);
+  typingSelf = { active: false, lastSent: 0, idleTimer: null };
+}
+
+elements.chatInput.addEventListener('input', () => {
+  if (!elements.chatInput.value.trim()) {
+    stopTyping();
+    return;
+  }
+  const now = Date.now();
+  if (!typingSelf.active || now - typingSelf.lastSent > TYPING_RESEND_MS) {
+    emitTyping(true);
+    typingSelf.active = true;
+    typingSelf.lastSent = now;
+  }
+  clearTimeout(typingSelf.idleTimer);
+  typingSelf.idleTimer = setTimeout(stopTyping, TYPING_IDLE_MS);
+});
+
+elements.chatInput.addEventListener('blur', stopTyping);
+
+function renderTyping() {
+  const names = Array.from(typingUsers.values()).map((u) => u.name).filter(Boolean);
+  const el = elements.chatTyping;
+  el.textContent = '';
+  if (!names.length) {
+    el.classList.remove('is-active');
+    return;
+  }
+  let label;
+  if (names.length === 1) label = `${names[0]} is typing`;
+  else if (names.length === 2) label = `${names[0]} and ${names[1]} are typing`;
+  else label = `${names.length} people are typing`;
+
+  const dots = document.createElement('span');
+  dots.className = 'chat__typing-dots';
+  dots.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 3; i++) dots.appendChild(document.createElement('span'));
+  const text = document.createElement('span');
+  text.textContent = label;
+  el.append(dots, text);
+  el.classList.add('is-active');
+}
+
 socket.on('chat:message', (message) => {
   if (!message || state.chat.some((m) => m.id === message.id)) return;
+  if (message.playerId && typingUsers.has(message.playerId)) {
+    clearTimeout(typingUsers.get(message.playerId).timer);
+    typingUsers.delete(message.playerId);
+    renderTyping();
+  }
   state.chat.push(message);
   if (state.chat.length > 100) state.chat.shift();
   appendChatMessage(message);
@@ -215,6 +294,8 @@ elements.chatForm.addEventListener('submit', (event) => {
   if (!text || !state.room) return;
 
   elements.chatSend.disabled = true;
+  clearTimeout(typingSelf.idleTimer);
+  typingSelf = { active: false, lastSent: 0, idleTimer: null }; // server clears it on send
   socket.emit('chat:send', { roomCode: state.room.code, text }, (response) => {
     updateChatControls();
     if (response?.ok) {

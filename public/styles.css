@@ -556,6 +556,63 @@ li span:last-child {
   padding: 0.65rem 1rem;
 }
 
+/* Typing indicator */
+.chat__typing {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.1rem;
+  margin-top: -0.25rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.chat__typing.is-active {
+  opacity: 1;
+}
+
+.chat__typing-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.chat__typing-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: typingBounce 1.2s infinite ease-in-out;
+}
+
+.chat__typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat__typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat__typing-dots span {
+    animation: none;
+  }
+}
+
 /* Floating toggle (shown only when chat becomes a drawer) */
 .chat-toggle {
   display: none;
