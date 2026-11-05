@@ -12,8 +12,17 @@ const PORT = process.env.PORT || 3000;
 const ROOMS = new Map();
 const WIN_PATTERNS_CACHE = new Map();
 const ALLOWED_BOARD_SIZES = [5, 6, 10];
+const CHAT_HISTORY_LIMIT = 50;
+const CHAT_MAX_LENGTH = 300;
+const CHAT_RATE_WINDOW_MS = 5000;
+const CHAT_RATE_MAX = 5;
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Health check endpoint (used by Render to verify the service is up)
+app.get('/healthz', (_req, res) => {
+  res.json({ ok: true, rooms: ROOMS.size });
+});
 
 httpServer.listen(PORT, () => {
   console.log(`Bingo server listening on http://localhost:${PORT}`);
@@ -36,6 +45,8 @@ io.on('connection', (socket) => {
 
     socket.join(roomCode);
     socket.emit('player:card', player.card);
+    socket.emit('chat:history', room.chat);
+    pushSystemMessage(room, `${player.name} created the room.`);
     broadcastRoom(roomCode);
 
     callback?.({ ok: true, room: serializeRoom(room), playerId: socket.id });
@@ -74,6 +85,8 @@ io.on('connection', (socket) => {
 
     socket.join(room.code);
     socket.emit('player:card', player.card);
+    socket.emit('chat:history', room.chat);
+    pushSystemMessage(room, `${player.name} joined the room.`);
     broadcastRoom(room.code);
 
     callback?.({ ok: true, room: serializeRoom(room), playerId: socket.id });
@@ -341,6 +354,35 @@ io.on('connection', (socket) => {
     callback?.({ ok: true });
   });
 
+  socket.on('chat:send', ({ roomCode, text } = {}, callback) => {
+    const room = findRoomForSocket(roomCode, socket.id, callback);
+    if (!room) return;
+
+    const player = room.players.get(socket.id);
+    const message = sanitizeChatText(text);
+    if (!message) {
+      return callback?.({ ok: false, message: 'Message cannot be empty.' });
+    }
+
+    // Simple per-player rate limit to prevent spam
+    const now = Date.now();
+    player.chatTimestamps = (player.chatTimestamps || []).filter((t) => now - t < CHAT_RATE_WINDOW_MS);
+    if (player.chatTimestamps.length >= CHAT_RATE_MAX) {
+      return callback?.({ ok: false, message: 'You are sending messages too fast.' });
+    }
+    player.chatTimestamps.push(now);
+
+    pushChatMessage(room, {
+      id: uuid(),
+      type: 'user',
+      playerId: player.id,
+      name: player.name,
+      text: message,
+      timestamp: now,
+    });
+    callback?.({ ok: true });
+  });
+
   socket.on('disconnect', () => {
     console.log(`Client disconnected ${socket.id}`);
     const room = findRoomByPlayer(socket.id);
@@ -403,16 +445,16 @@ function forceRemovePlayer(room, playerId, reason = 'Removed by host') {
   if (!room.players.has(playerId)) return;
   io.to(playerId).emit('player:kicked', reason);
   const targetSocket = io.sockets.sockets.get(playerId);
-  if (targetSocket) {
-    targetSocket.leave(room.code);
-    targetSocket.disconnect(true);
-  }
+  targetSocket?.leave(room.code);
+  // Remove first so the disconnect handler doesn't report it as a normal leave
   removePlayerFromRoom(room, playerId, reason);
+  targetSocket?.disconnect(true);
 }
 
 function removePlayerFromRoom(room, playerId, reason = 'Player removed') {
   if (!room.players.has(playerId)) return;
 
+  const leavingName = room.players.get(playerId)?.name;
   room.players.delete(playerId);
   const orderIndex = room.playerOrder.indexOf(playerId);
   if (orderIndex !== -1) {
@@ -427,8 +469,15 @@ function removePlayerFromRoom(room, playerId, reason = 'Player removed') {
     return;
   }
 
+  if (leavingName) {
+    const suffix = reason === 'Removed by host' ? ' was removed by the host.' : ' left the room.';
+    pushSystemMessage(room, `${leavingName}${suffix}`);
+  }
+
   if (room.hostId === playerId) {
-    room.hostId = room.playerOrder[0];
+    room.hostId = room.players.has(room.playerOrder[0])
+      ? room.playerOrder[0]
+      : room.players.keys().next().value;
     io.to(room.code).emit('room:hostChanged', room.players.get(room.hostId)?.name || 'Host');
   }
 
@@ -492,7 +541,32 @@ function bootstrapRoom(code, hostId) {
     loser: null,
     boardSize,
     winPatterns: getWinPatterns(boardSize),
+    chat: [],
   };
+}
+
+function pushChatMessage(room, message) {
+  room.chat.push(message);
+  if (room.chat.length > CHAT_HISTORY_LIMIT) {
+    room.chat.splice(0, room.chat.length - CHAT_HISTORY_LIMIT);
+  }
+  io.to(room.code).emit('chat:message', message);
+}
+
+function pushSystemMessage(room, text) {
+  pushChatMessage(room, {
+    id: uuid(),
+    type: 'system',
+    text,
+    timestamp: Date.now(),
+  });
+}
+
+function sanitizeChatText(text) {
+  return String(text || '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .trim()
+    .slice(0, CHAT_MAX_LENGTH);
 }
 
 function createPlayer(id, name, boardSize = 5) {

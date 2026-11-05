@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
-
 :root {
   --bg-color: #0f172a;
   --panel-bg: rgba(30, 41, 59, 0.7);
@@ -36,11 +34,12 @@ body {
 
 .app {
   display: grid;
-  grid-template-columns: 350px 1fr;
-  gap: 2rem;
-  max-width: 1200px;
+  grid-template-columns: 300px minmax(0, 1fr) 320px;
+  gap: 1.5rem;
+  max-width: 1500px;
   width: 100%;
-  height: 90vh;
+  height: calc(100vh - 2rem);
+  height: calc(100dvh - 2rem);
 }
 
 /* Panels */
@@ -58,11 +57,7 @@ body {
   overflow-y: auto;
 }
 
-.panel--left {
-  /* Sidebar */
-}
-
-.panel--right {
+.panel--center {
   justify-content: center;
   align-items: center;
   position: relative;
@@ -259,8 +254,7 @@ li span:last-child {
 
 /* Bingo Card */
 .card-container {
-  width: 100%;
-  max-width: 600px;
+  width: min(100%, 600px, calc(100vh - 12rem));
   aspect-ratio: 1;
   padding: 1rem;
   background: rgba(15, 23, 42, 0.3);
@@ -279,202 +273,11 @@ li span:last-child {
   background: rgba(30, 41, 59, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 16px;
+  padding: 0;
+  min-width: 0;
   color: var(--text-main);
   font-weight: 700;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-}
-
-.cell:hover:not(:disabled) {
-  transform: scale(1.05);
-  background: rgba(59, 130, 246, 0.2);
-  border-color: var(--primary-color);
-  z-index: 10;
-}
-
-.cell.called {
-  background: rgba(251, 191, 36, 0.15);
-  /* Gold tint */
-  color: var(--gold-color);
-  border-color: var(--gold-color);
-  box-shadow: 0 0 15px rgba(251, 191, 36, 0.2);
-}
-
-.cell.marked {
-  background: var(--accent-color) !important;
-  color: #064e3b !important;
-  /* Dark green text */
-  border-color: var(--accent-color);
-  box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
-  transform: scale(1);
-  animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-@keyframes popIn {
-  0% {
-    transform: scale(0.8);
-    opacity: 0;
-  }
-
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-.cell-stripe {
-  position: absolute;
-  background: rgba(255, 255, 255, 0.4);
-  pointer-events: none;
-}
-
-.cell-stripe.horizontal {
-  width: 100%;
-  height: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.cell-stripe.vertical {
-  height: 100%;
-  width: 4px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.cell-stripe.diagonal-left {
-  width: 140%;
-  height: 4px;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) rotate(45deg);
-}
-
-.cell-stripe.diagonal-right {
-  width: 140%;
-  height: 4px;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) rotate(-45deg);
-}
-
-/* Called Numbers Grid */
-.number-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
-  gap: 0.5rem;
-}
-
-.number-grid span {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: rgba(251, 191, 36, 0.2);
-  color: var(--gold-color);
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 0.9rem;
-  animation: fadeIn 0.5s ease;
-}
-
-.actions {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.actions button {
-  flex: 1;
-}
-
-/* Status & Info */
-.status {
-  font-weight: 600;
-  min-height: 1.5rem;
-  transition: color 0.3s ease;
-}
-
-.turn-indicator {
-  font-size: 1.1rem;
-  font-weight: 700;
-  padding: 0.75rem;
-  background: rgba(15, 23, 42, 0.4);
-  border-radius: 12px;
-  text-align: center;
-  animation: pulse 2s infinite;
-  display: none;
-  /* Hidden by default */
-}
-
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
-  }
-
-  70% {
-    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
-  }
-
-  100% {
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
-  }
-}
-
-/* Lists */
-ul,
-ol {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-li {
-  background: rgba(15, 23, 42, 0.4);
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.95rem;
-  transition: all 0.3s ease;
-}
-
-li span:last-child {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-/* Bingo Card */
-.card-container {
-  width: 100%;
-  max-width: 600px;
-  aspect-ratio: 1;
-  padding: 1rem;
-  background: rgba(15, 23, 42, 0.3);
-  border-radius: 32px;
-  border: 1px solid var(--panel-border);
-}
-
-.card {
-  display: grid;
-  gap: 0.75rem;
-  height: 100%;
-  width: 100%;
-}
-
-.cell {
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 16px;
-  color: var(--text-main);
-  font-weight: 700;
+  font-size: clamp(1rem, 3.2vw, 1.4rem);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -604,31 +407,335 @@ li span:last-child {
   margin-bottom: 1rem;
 }
 
-/* Responsive */
-@media (max-width: 900px) {
+/* Card density per board size */
+.card[data-size="6"] {
+  gap: 0.6rem;
+}
+
+.card[data-size="6"] .cell {
+  font-size: clamp(0.9rem, 2.6vw, 1.1rem);
+  border-radius: 12px;
+}
+
+.card[data-size="10"] {
+  gap: 0.35rem;
+}
+
+.card[data-size="10"] .cell {
+  font-size: clamp(0.65rem, 1.8vw, 0.9rem);
+  border-radius: 8px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.panel__section .hint {
+  margin-top: 0.5rem;
+}
+
+/* ---------------- Chat ---------------- */
+.panel--chat {
+  padding: 1.25rem;
+  gap: 0.75rem;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.chat__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.chat__header h2 {
+  border: none;
+  margin: 0;
+}
+
+.chat__close {
+  display: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 1.6rem;
+  line-height: 1;
+  padding: 0.25rem 0.6rem;
+}
+
+.chat__close:hover:not(:disabled) {
+  color: white;
+  transform: none;
+  box-shadow: none;
+}
+
+.chat__messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  gap: 0.5rem;
+  padding-right: 0.25rem;
+  overscroll-behavior: contain;
+}
+
+.chat__messages li {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  max-width: 88%;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.chat__msg {
+  align-self: flex-start;
+  background: rgba(51, 65, 85, 0.55);
+  border-bottom-left-radius: 2px;
+}
+
+.chat__msg--mine {
+  align-self: flex-end;
+  background: rgba(59, 130, 246, 0.25);
+  border-radius: 8px;
+  border-bottom-right-radius: 2px;
+}
+
+.chat__msg--system,
+.chat__empty {
+  align-self: center;
+  background: transparent !important;
+  color: var(--text-muted);
+  font-size: 0.8rem !important;
+  font-style: italic;
+  text-align: center;
+  max-width: 100% !important;
+}
+
+.chat__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  margin-bottom: 0.15rem;
+}
+
+.chat__author {
+  font-weight: 600;
+  color: var(--gold-color);
+}
+
+.chat__msg--mine .chat__author {
+  color: #93c5fd;
+}
+
+.chat__time {
+  color: var(--text-muted);
+}
+
+.chat__text {
+  font-size: 0.92rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.chat__form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chat__form input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.65rem 0.85rem;
+}
+
+.chat__form button {
+  padding: 0.65rem 1rem;
+}
+
+/* Floating toggle (shown only when chat becomes a drawer) */
+.chat-toggle {
+  display: none;
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  z-index: 40;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+}
+
+.chat-toggle__badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--danger-color);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 22px;
+}
+
+.chat-toggle__badge[hidden] {
+  display: none;
+}
+
+.chat-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.6);
+  z-index: 45;
+}
+
+.chat-backdrop[hidden] {
+  display: none;
+}
+
+/* ---------------- Responsive ---------------- */
+
+/* Medium screens: chat becomes a slide-in drawer */
+@media (max-width: 1199px) {
   .app {
-    grid-template-columns: 1fr;
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
+
+  .panel--chat {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(380px, 100vw);
+    border-radius: 24px 0 0 24px;
+    background: rgba(15, 23, 42, 0.97);
+    z-index: 50;
+    transform: translateX(105%);
+    transition: transform 0.25s ease;
+    padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  }
+
+  body.chat-open .panel--chat {
+    transform: translateX(0);
+  }
+
+  body.chat-open .chat-toggle {
+    display: none;
+  }
+
+  .chat__close {
+    display: inline-block;
+  }
+
+  .chat-toggle {
+    display: block;
+  }
+}
+
+/* Tablets & phones: stack panels, card first */
+@media (max-width: 899px) {
+  body {
+    align-items: flex-start;
+    padding: 0.75rem;
+  }
+
+  .app {
+    grid-template-columns: minmax(0, 1fr);
     height: auto;
     gap: 1rem;
   }
 
   .panel {
-    padding: 1.5rem;
+    padding: 1.25rem;
+    border-radius: 20px;
+    overflow: visible;
   }
 
-  .panel--right {
+  /* Once in a room, show the card first */
+  body.in-room .panel--center {
     order: -1;
-    /* Show card first on mobile */
-    min-height: 500px;
+  }
+
+  .card-container {
+    width: 100%;
+    max-width: 600px;
+    padding: 0.6rem;
+    border-radius: 20px;
+  }
+
+  .card {
+    gap: 0.5rem;
   }
 
   .controls {
-    position: static;
-    width: 100%;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
   }
 
   .controls button {
     flex: 1;
+  }
+
+  /* leave room so the floating chat button never covers content */
+  .panel--left {
+    margin-bottom: 4.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    padding: 0.5rem;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+
+  .panel {
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .panel--chat {
+    width: 100vw;
+    border-radius: 0;
+  }
+
+  .actions,
+  .controls {
+    flex-direction: column;
+  }
+
+  .card-container {
+    padding: 0.4rem;
+  }
+
+  .card,
+  .card[data-size="6"] {
+    gap: 0.35rem;
+  }
+
+  .card[data-size="10"] {
+    gap: 0.2rem;
+  }
+
+  .cell {
+    border-radius: 10px;
+  }
+
+  .card[data-size="10"] .cell {
+    border-radius: 5px;
+  }
+
+  .info-grid {
+    grid-template-columns: 1fr;
   }
 }

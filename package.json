@@ -1,7 +1,7 @@
 {
   "name": "bingo-game",
   "version": "1.0.0",
-  "description": "Multiplayer Bingo game for local network play",
+  "description": "Multiplayer Bingo game with room chat",
   "main": "server/index.js",
   "scripts": {
     "dev": "nodemon server/index.js",
@@ -18,5 +18,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.11"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
