@@ -42,12 +42,12 @@
             <option value="10">10 × 10 (Epic)</option>
           </select>
         </label>
-        <p class="hint" style="margin-top: 0.5rem;">Only the host can change size while waiting.</p>
+        <p class="hint">Only the host can change size while waiting.</p>
       </div>
 
       <div class="panel__section" id="room-info">
         <h2>Room Info</h2>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.9rem;">
+        <div class="info-grid">
           <p>Code: <strong id="info-code" style="color: var(--primary-color)">—</strong></p>
           <p>Status: <strong id="info-status">Not connected</strong></p>
           <p>Host: <strong id="info-host">—</strong></p>
@@ -75,7 +75,7 @@
       </div>
     </section>
 
-    <section class="panel panel--right">
+    <section class="panel panel--center">
       <div class="controls">
         <button id="start-game" disabled>Start Round</button>
         <button id="reset-after-game" class="secondary" disabled style="display: none;">Reset Game</button>
@@ -84,9 +84,28 @@
         <div id="bingo-card" class="card"></div>
       </div>
     </section>
+
+    <aside class="panel panel--chat" id="chat-panel" aria-label="Room chat">
+      <header class="chat__header">
+        <h2>Room Chat</h2>
+        <button id="chat-close" class="chat__close" aria-label="Close chat" type="button">&times;</button>
+      </header>
+      <ul id="chat-messages" class="chat__messages" aria-live="polite">
+        <li class="chat__empty">Join a room to start chatting.</li>
+      </ul>
+      <form id="chat-form" class="chat__form" autocomplete="off">
+        <input id="chat-input" maxlength="300" placeholder="Join a room to chat" disabled aria-label="Chat message" />
+        <button id="chat-send" type="submit" disabled aria-label="Send message">Send</button>
+      </form>
+    </aside>
   </main>
 
-  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <button id="chat-toggle" class="chat-toggle" type="button" aria-controls="chat-panel" aria-expanded="false" aria-label="Open chat">
+    💬<span id="chat-badge" class="chat-toggle__badge" hidden>0</span>
+  </button>
+  <div id="chat-backdrop" class="chat-backdrop" hidden></div>
+
+  <script src="/socket.io/socket.io.js"></script>
   <script src="client.js" type="module"></script>
 </body>
 

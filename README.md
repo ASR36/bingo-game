@@ -36,6 +36,23 @@ The server listens on `http://localhost:3000`. Everyone on the local network can
 7. **Lose condition**: Last player standing (if others drop out) loses.
 8. The host can **remove disruptive players**, **change board size** between rounds, and **reset** whenever they’re ready for the next game.
 
+## Room Chat
+
+Every room has a live chat panel on the right side of the screen.
+
+- Messages are only visible to players in the same room; the last 50 are kept so late joiners see recent history.
+- Join/leave/kick events appear as system messages.
+- Messages are limited to 300 characters and 5 messages per 5 seconds per player (anti-spam), and are rendered as plain text (no HTML injection).
+- **Responsive:** on wide screens (≥1200px) chat is a third column; on tablets and phones it becomes a slide-in drawer opened with the 💬 button, which shows an unread-message badge.
+
+## Deploying to Render
+
+The app runs as a single long-lived Node web service (required for Socket.IO websockets).
+
+- `render.yaml` is included as a Blueprint: **Build** `npm install`, **Start** `npm start`, health check `/healthz`.
+- The server reads Render's `PORT` env var automatically.
+- Rooms and chat are kept in memory, so they reset when the service restarts or the free instance spins down.
+
 ## Scripts
 
 - `npm run dev` – start the server with hot reload (nodemon)

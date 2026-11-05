@@ -21,6 +21,15 @@ const elements = {
   startGame: document.getElementById('start-game'),
   resetAfterGame: document.getElementById('reset-after-game'),
   boardSizeSelect: document.getElementById('board-size'),
+  chatPanel: document.getElementById('chat-panel'),
+  chatMessages: document.getElementById('chat-messages'),
+  chatForm: document.getElementById('chat-form'),
+  chatInput: document.getElementById('chat-input'),
+  chatSend: document.getElementById('chat-send'),
+  chatToggle: document.getElementById('chat-toggle'),
+  chatClose: document.getElementById('chat-close'),
+  chatBadge: document.getElementById('chat-badge'),
+  chatBackdrop: document.getElementById('chat-backdrop'),
 };
 
 const state = {
@@ -30,7 +39,12 @@ const state = {
   marked: new Set(),
   completedCells: new Map(),
   boardSize: 5,
+  chat: [],
+  chatOpen: false,
+  unread: 0,
 };
+
+const chatDrawerQuery = window.matchMedia('(max-width: 1199px)');
 
 const winPatternCache = new Map();
 
@@ -118,6 +132,7 @@ socket.on('room:update', (room) => {
   state.completedCells = computeCompletedCells();
   renderCard();
   updateControls();
+  updateChatControls();
 
   // Auto-check if current player completed a line
   if (room.status === 'running' && room.currentPlayerId === state.playerId) {
@@ -166,6 +181,160 @@ socket.on('player:kicked', (reason) => {
   window.location.reload();
 });
 
+/* ---------------- Chat ---------------- */
+
+socket.on('chat:history', (messages) => {
+  state.chat = Array.isArray(messages) ? messages.slice() : [];
+  renderChat();
+});
+
+socket.on('chat:message', (message) => {
+  if (!message || state.chat.some((m) => m.id === message.id)) return;
+  state.chat.push(message);
+  if (state.chat.length > 100) state.chat.shift();
+  appendChatMessage(message);
+
+  const fromMe = message.playerId && message.playerId === state.playerId;
+  if (!fromMe && message.type === 'user' && !isChatVisible()) {
+    state.unread += 1;
+    updateChatBadge();
+  }
+});
+
+socket.on('disconnect', () => {
+  updateChatControls();
+});
+
+socket.on('connect', () => {
+  updateChatControls();
+});
+
+elements.chatForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const text = elements.chatInput.value.trim();
+  if (!text || !state.room) return;
+
+  elements.chatSend.disabled = true;
+  socket.emit('chat:send', { roomCode: state.room.code, text }, (response) => {
+    updateChatControls();
+    if (response?.ok) {
+      elements.chatInput.value = '';
+      elements.chatInput.focus();
+    } else {
+      setStatus(response?.message ?? 'Unable to send message.', true);
+    }
+  });
+});
+
+elements.chatToggle.addEventListener('click', () => setChatOpen(!state.chatOpen));
+elements.chatClose.addEventListener('click', () => setChatOpen(false));
+elements.chatBackdrop.addEventListener('click', () => setChatOpen(false));
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.chatOpen) setChatOpen(false);
+});
+chatDrawerQuery.addEventListener('change', () => {
+  if (!chatDrawerQuery.matches) setChatOpen(false);
+  if (isChatVisible()) {
+    state.unread = 0;
+    updateChatBadge();
+  }
+});
+
+function isChatVisible() {
+  return !chatDrawerQuery.matches || state.chatOpen;
+}
+
+function setChatOpen(open) {
+  state.chatOpen = open;
+  document.body.classList.toggle('chat-open', open);
+  elements.chatToggle.setAttribute('aria-expanded', String(open));
+  elements.chatBackdrop.hidden = !open;
+  if (open) {
+    state.unread = 0;
+    updateChatBadge();
+    scrollChatToBottom();
+    if (!elements.chatInput.disabled) elements.chatInput.focus();
+  }
+}
+
+function updateChatBadge() {
+  const badge = elements.chatBadge;
+  badge.hidden = state.unread === 0;
+  badge.textContent = state.unread > 99 ? '99+' : String(state.unread);
+}
+
+function updateChatControls() {
+  const canChat = Boolean(state.room) && socket.connected;
+  elements.chatInput.disabled = !canChat;
+  elements.chatSend.disabled = !canChat;
+  elements.chatInput.placeholder = canChat ? 'Type a message…' : 'Join a room to chat';
+}
+
+function renderChat() {
+  const list = elements.chatMessages;
+  list.innerHTML = '';
+  if (!state.chat.length) {
+    const empty = document.createElement('li');
+    empty.className = 'chat__empty';
+    empty.textContent = state.room ? 'No messages yet. Say hi! 👋' : 'Join a room to start chatting.';
+    list.appendChild(empty);
+    return;
+  }
+  state.chat.forEach((message) => list.appendChild(buildChatItem(message)));
+  scrollChatToBottom(true);
+}
+
+function appendChatMessage(message) {
+  const list = elements.chatMessages;
+  list.querySelector('.chat__empty')?.remove();
+  const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  list.appendChild(buildChatItem(message));
+  while (list.children.length > 100) list.firstElementChild.remove();
+  const fromMe = message.playerId && message.playerId === state.playerId;
+  if (nearBottom || fromMe) scrollChatToBottom();
+}
+
+function buildChatItem(message) {
+  const li = document.createElement('li');
+
+  if (message.type === 'system') {
+    li.className = 'chat__msg chat__msg--system';
+    li.textContent = message.text;
+    return li;
+  }
+
+  const isMine = message.playerId === state.playerId;
+  li.className = `chat__msg${isMine ? ' chat__msg--mine' : ''}`;
+
+  const meta = document.createElement('div');
+  meta.className = 'chat__meta';
+  const author = document.createElement('span');
+  author.className = 'chat__author';
+  author.textContent = isMine ? 'You' : message.name;
+  const time = document.createElement('time');
+  time.className = 'chat__time';
+  const date = new Date(message.timestamp);
+  time.dateTime = date.toISOString();
+  time.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  meta.append(author, time);
+
+  const body = document.createElement('p');
+  body.className = 'chat__text';
+  body.textContent = message.text; // textContent prevents HTML injection
+
+  li.append(meta, body);
+  return li;
+}
+
+function scrollChatToBottom(instant = false) {
+  const list = elements.chatMessages;
+  requestAnimationFrame(() => {
+    list.scrollTo({ top: list.scrollHeight, behavior: instant ? 'auto' : 'smooth' });
+  });
+}
+
+/* ---------------- Ack helper ---------------- */
+
 function handleAck(response) {
   if (!response) return;
   if (response.ok) {
@@ -177,6 +346,8 @@ function handleAck(response) {
       renderInfo();
       renderPlayers();
       updateControls();
+      updateChatControls();
+      if (!state.chat.length) renderChat();
     }
   } else {
     setStatus(response.message ?? 'Something went wrong.', true);
@@ -197,14 +368,13 @@ function renderCard() {
   const isEliminated = player?.isEliminated;
   const size = state.boardSize || Math.round(Math.sqrt(state.card.length)) || 5;
 
-  const minCellSize = size >= 10 ? 32 : size >= 6 ? 48 : 70;
-  elements.card.style.gridTemplateColumns = `repeat(${size}, minmax(${minCellSize}px, 1fr))`;
+  elements.card.style.gridTemplateColumns = `repeat(${size}, minmax(0, 1fr))`;
+  elements.card.dataset.size = String(size);
 
   state.card.forEach((number) => {
     const cell = document.createElement('button');
     cell.className = 'cell';
     cell.textContent = number;
-    cell.style.fontSize = size >= 10 ? '0.85rem' : size >= 6 ? '1.05rem' : '1.4rem';
 
     const isCalled = called.has(number);
     const isMarked = state.marked.has(number);
@@ -271,7 +441,6 @@ function toggleMark(number) {
       state.marked.add(number);
     }
     state.completedCells = computeCompletedCells();
-    renderCard();
     renderCard();
     syncMarkedNumbersToServer();
     return;
@@ -427,7 +596,7 @@ function renderWinners() {
       li.style.color = '#34d399';
       li.style.fontWeight = 'bold';
     } else if (isLoser) {
-      display = `❌ ${display} - Better Luck Next Time! �`;
+      display = `❌ ${display} - Better Luck Next Time!`;
       li.style.color = '#ef4444';
     }
     li.textContent = display;
@@ -439,6 +608,7 @@ function updateControls() {
   const room = state.room;
   const isHost = room?.hostId === state.playerId;
   const connected = Boolean(room);
+  document.body.classList.toggle('in-room', connected);
 
   elements.startGame.disabled = !(connected && isHost && room?.status === 'waiting');
 
