@@ -354,6 +354,18 @@ io.on('connection', (socket) => {
     callback?.({ ok: true });
   });
 
+  socket.on('chat:typing', ({ roomCode, typing } = {}) => {
+    const code = normalizeCode(roomCode);
+    const room = code && ROOMS.get(code);
+    if (!room || !room.players.has(socket.id)) return;
+    const player = room.players.get(socket.id);
+    socket.to(room.code).emit('chat:typing', {
+      playerId: player.id,
+      name: player.name,
+      typing: Boolean(typing),
+    });
+  });
+
   socket.on('chat:send', ({ roomCode, text } = {}, callback) => {
     const room = findRoomForSocket(roomCode, socket.id, callback);
     if (!room) return;
@@ -380,6 +392,7 @@ io.on('connection', (socket) => {
       text: message,
       timestamp: now,
     });
+    socket.to(room.code).emit('chat:typing', { playerId: player.id, name: player.name, typing: false });
     callback?.({ ok: true });
   });
 
@@ -456,6 +469,7 @@ function removePlayerFromRoom(room, playerId, reason = 'Player removed') {
 
   const leavingName = room.players.get(playerId)?.name;
   room.players.delete(playerId);
+  io.to(room.code).emit('chat:typing', { playerId, name: leavingName, typing: false });
   const orderIndex = room.playerOrder.indexOf(playerId);
   if (orderIndex !== -1) {
     room.playerOrder.splice(orderIndex, 1);

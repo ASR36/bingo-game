@@ -42,6 +42,7 @@ Every room has a live chat panel on the right side of the screen.
 
 - Messages are only visible to players in the same room; the last 50 are kept so late joiners see recent history.
 - Join/leave/kick events appear as system messages.
+- A typing indicator ("Alice is typing…") shows who is composing a message; it clears when they send, stop typing for 3 seconds, or leave.
 - Messages are limited to 300 characters and 5 messages per 5 seconds per player (anti-spam), and are rendered as plain text (no HTML injection).
 - **Responsive:** on wide screens (≥1200px) chat is a third column; on tablets and phones it becomes a slide-in drawer opened with the 💬 button, which shows an unread-message badge.
 
