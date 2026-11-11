@@ -734,7 +734,7 @@ function renderInfo() {
           ? `${currentPlayer.name} is thinking… · ${points}/5`
           : `${currentPlayer.connected === false ? '⏳' : '👤'} ${currentPlayer.name}'s turn${currentPlayer.connected === false ? ' (reconnecting…)' : ''} · ${points}/5`;
       elements.turnIndicator.style.display = 'block';
-      elements.turnIndicator.style.color = isMyTurn ? '#34d399' : '#fbbf24';
+      elements.turnIndicator.style.color = isMyTurn ? '#e6c27a' : '#f5efe4';
     }
   } else if (room?.status === 'waiting') {
     const isHost = room.hostId === state.playerId;
@@ -747,11 +747,11 @@ function renderInfo() {
           ? `${room.players.length} players ready — press Start round`
           : 'Waiting for the host to start';
     elements.turnIndicator.style.display = 'block';
-    elements.turnIndicator.style.color = '#9ea6c2';
+    elements.turnIndicator.style.color = '#b3a99a';
   } else if (room?.status === 'ended') {
     elements.turnIndicator.textContent = '🏁 Game over — see the leaderboard';
     elements.turnIndicator.style.display = 'block';
-    elements.turnIndicator.style.color = '#ffc94a';
+    elements.turnIndicator.style.color = '#e6c27a';
   } else {
     elements.turnIndicator.style.display = 'none';
   }
@@ -861,7 +861,7 @@ function renderWinners() {
     name.textContent = `${player.name}${player.id === state.playerId ? ' (you)' : ''}`;
     const tag = document.createElement('span');
     tag.className = 'lb-row__tag';
-    tag.textContent = rank ? `Finished #${rank}` : isLoser ? 'Last standing' : player.isCurrentTurn ? 'Their turn' : '';
+    tag.textContent = rank ? `Finished #${rank}` : isLoser ? 'Last standing' : player.isCurrentTurn ? (player.id === state.playerId ? 'Your turn' : 'Their turn') : '';
     if (tag.textContent) name.appendChild(tag);
 
     const pts = document.createElement('span');
@@ -974,7 +974,7 @@ function buildWinPatterns(size) {
 function setStatus(message, isError = false) {
   if (elements.status) {
     elements.status.textContent = message;
-    elements.status.style.color = isError ? '#ff8aa5' : '#3ddc97';
+    elements.status.style.color = isError ? '#f3b8b8' : '#e6c27a';
   }
   // In a room the lobby form is hidden, so show messages as a toast instead.
   if (state.room && message) toast(message, isError);
