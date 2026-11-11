@@ -16,6 +16,13 @@ const CHAT_HISTORY_LIMIT = 50;
 const CHAT_MAX_LENGTH = 300;
 const CHAT_RATE_WINDOW_MS = 5000;
 const CHAT_RATE_MAX = 5;
+const RECONNECT_GRACE_MS = Number(process.env.RECONNECT_GRACE_MS) || 60_000;
+
+// Link back to the Arena hub (set ARENA_URL on Render).
+app.get('/config.js', (_req, res) => {
+  res.type('application/javascript').set('Cache-Control', 'no-cache');
+  res.send(`window.APP_CONFIG = ${JSON.stringify({ arenaUrl: process.env.ARENA_URL || '' })};`);
+});
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -24,37 +31,51 @@ app.get('/healthz', (_req, res) => {
   res.json({ ok: true, rooms: ROOMS.size });
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Bingo server listening on http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  httpServer.listen(PORT, () => {
+    console.log(`Bingo server listening on http://localhost:${PORT}`);
+  });
+}
 
 io.on('connection', (socket) => {
-  console.log(`Client connected ${socket.id}`);
+  // A player's identity is a private per-tab key (sent by the client), not the socket id,
+  // so a refresh or a dropped connection can resume the same seat.
+  const keyOf = () => socket.data.playerKey || socket.id;
 
-  socket.on('createRoom', ({ name }, callback) => {
+  socket.on('resumeRoom', ({ roomCode, clientId } = {}, callback) => {
+    const key = sanitizeClientId(clientId);
+    const room = ROOMS.get(normalizeCode(roomCode));
+    const player = key && room?.players.get(key);
+    if (!player) return callback?.({ ok: false, message: 'Session expired.' });
+    attachSocket(socket, room, player);
+    callback?.({ ok: true, room: serializeRoom(room), playerId: player.publicId, card: player.card, resumed: true });
+  });
+
+  socket.on('createRoom', ({ name, clientId } = {}, callback) => {
     const playerName = sanitizeName(name);
     if (!playerName) {
       return callback?.({ ok: false, message: 'Name is required to create a room.' });
     }
 
+    leaveCurrentRoom(socket);
+    const key = sanitizeClientId(clientId) || socket.id;
     const roomCode = generateRoomCode();
-    const room = bootstrapRoom(roomCode, socket.id);
-    const player = createPlayer(socket.id, playerName, room.boardSize);
-    room.players.set(socket.id, player);
+    const room = bootstrapRoom(roomCode, key);
+    const player = createPlayer(key, playerName, room.boardSize);
+    room.players.set(key, player);
     ROOMS.set(roomCode, room);
 
-    socket.join(roomCode);
-    socket.emit('player:card', player.card);
-    socket.emit('chat:history', room.chat);
+    attachSocket(socket, room, player, { silent: true });
     pushSystemMessage(room, `${player.name} created the room.`);
     broadcastRoom(roomCode);
 
-    callback?.({ ok: true, room: serializeRoom(room), playerId: socket.id });
+    callback?.({ ok: true, room: serializeRoom(room), playerId: player.publicId });
   });
 
-  socket.on('joinRoom', ({ name, roomCode }, callback) => {
+  socket.on('joinRoom', ({ name, roomCode, clientId } = {}, callback) => {
     const playerName = sanitizeName(name);
     const normalized = normalizeCode(roomCode);
+    const key = sanitizeClientId(clientId) || socket.id;
 
     if (!playerName || !normalized) {
       return callback?.({ ok: false, message: 'Name and room code are required.' });
@@ -65,12 +86,15 @@ io.on('connection', (socket) => {
       return callback?.({ ok: false, message: 'Room not found.' });
     }
 
-    if (room.status === 'running' || room.status === 'ended') {
-      return callback?.({ ok: false, message: 'Game already in progress. Wait for next round.' });
+    // Same browser tab coming back: resume instead of joining twice.
+    if (room.players.has(key)) {
+      const existing = room.players.get(key);
+      attachSocket(socket, room, existing);
+      return callback?.({ ok: true, room: serializeRoom(room), playerId: existing.publicId, resumed: true });
     }
 
-    if (room.players.has(socket.id)) {
-      return callback?.({ ok: true, room: serializeRoom(room), playerId: socket.id });
+    if (room.status === 'running' || room.status === 'ended') {
+      return callback?.({ ok: false, message: 'Game already in progress. Wait for next round.' });
     }
 
     const duplicate = Array.from(room.players.values()).some(
@@ -80,23 +104,22 @@ io.on('connection', (socket) => {
       return callback?.({ ok: false, message: 'Name already taken in this room.' });
     }
 
-    const player = createPlayer(socket.id, playerName, room.boardSize || 5);
-    room.players.set(socket.id, player);
+    leaveCurrentRoom(socket);
+    const player = createPlayer(key, playerName, room.boardSize || 5);
+    room.players.set(key, player);
 
-    socket.join(room.code);
-    socket.emit('player:card', player.card);
-    socket.emit('chat:history', room.chat);
+    attachSocket(socket, room, player, { silent: true });
     pushSystemMessage(room, `${player.name} joined the room.`);
     broadcastRoom(room.code);
 
-    callback?.({ ok: true, room: serializeRoom(room), playerId: socket.id });
+    callback?.({ ok: true, room: serializeRoom(room), playerId: player.publicId });
   });
 
   socket.on('changeBoardSize', ({ roomCode, size }, callback) => {
-    const room = findRoomForSocket(roomCode, socket.id, callback);
+    const room = findRoomForSocket(roomCode, keyOf(), callback);
     if (!room) return;
 
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== keyOf()) {
       return callback?.({ ok: false, message: 'Only the host can change board size.' });
     }
 
@@ -127,7 +150,7 @@ io.on('connection', (socket) => {
       player.completedLines = new Set();
       player.hasWon = false;
       player.isEliminated = false;
-      io.to(player.id).emit('player:card', player.card);
+      io.to(player.socketId).emit('player:card', player.card);
     }
 
     broadcastRoom(room.code);
@@ -135,10 +158,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('startGame', ({ roomCode }, callback) => {
-    const room = findRoomForSocket(roomCode, socket.id, callback);
+    const room = findRoomForSocket(roomCode, keyOf(), callback);
     if (!room) return;
 
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== keyOf()) {
       return callback?.({ ok: false, message: 'Only the host can start the game.' });
     }
 
@@ -163,7 +186,7 @@ io.on('connection', (socket) => {
       player.completedLines.clear();
       player.hasWon = false;
       player.isEliminated = false;
-      io.to(player.id).emit('player:card', player.card);
+      io.to(player.socketId).emit('player:card', player.card);
     }
 
     broadcastRoom(room.code);
@@ -171,10 +194,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('callNextNumber', ({ roomCode }, callback) => {
-    const room = findRoomForSocket(roomCode, socket.id, callback);
+    const room = findRoomForSocket(roomCode, keyOf(), callback);
     if (!room) return;
 
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== keyOf()) {
       return callback?.({ ok: false, message: 'Only the host can call numbers.' });
     }
 
@@ -197,14 +220,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('callSpecificNumber', ({ roomCode, number, markedNumbers }, callback) => {
-    const room = findRoomForSocket(roomCode, socket.id, callback);
+    const room = findRoomForSocket(roomCode, keyOf(), callback);
     if (!room) return;
 
     if (room.status !== 'running') {
       return callback?.({ ok: false, message: 'Start the round before calling numbers.' });
     }
 
-    const player = room.players.get(socket.id);
+    const player = room.players.get(keyOf());
     if (!player) {
       return callback?.({ ok: false, message: 'Player not found.' });
     }
@@ -214,7 +237,7 @@ io.on('connection', (socket) => {
     }
 
     const currentPlayerId = room.playerOrder[room.currentTurnIndex];
-    if (socket.id !== currentPlayerId) {
+    if (keyOf() !== currentPlayerId) {
       const currentPlayer = room.players.get(currentPlayerId);
       return callback?.({ ok: false, message: `It's ${currentPlayer?.name || 'someone else'}'s turn.` });
     }
@@ -250,9 +273,9 @@ io.on('connection', (socket) => {
     if (!code) return;
     const room = ROOMS.get(code);
     if (!room || room.status !== 'running') return;
-    if (!room.players.has(socket.id)) return;
+    if (!room.players.has(keyOf())) return;
 
-    const player = room.players.get(socket.id);
+    const player = room.players.get(keyOf());
     if (!player || player.isEliminated || player.hasWon) return;
 
     const winPatterns = room.winPatterns || getWinPatterns(room.boardSize || 5);
@@ -284,7 +307,7 @@ io.on('connection', (socket) => {
         player.hasWon = true;
         const rank = room.winners.length + 1;
         room.winners.push({
-          id: player.id,
+          id: player.publicId,
           name: player.name,
           rank,
           timestamp: Date.now()
@@ -306,7 +329,7 @@ io.on('connection', (socket) => {
           const loserId = activePlayers[0];
           const loser = room.players.get(loserId);
           if (loser) {
-            room.loser = { id: loser.id, name: loser.name };
+            room.loser = { id: loser.publicId, name: loser.name };
           }
           room.status = 'ended';
           io.to(room.code).emit('room:gameEnded', {
@@ -321,10 +344,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('resetGame', ({ roomCode }, callback) => {
-    const room = findRoomForSocket(roomCode, socket.id, callback);
+    const room = findRoomForSocket(roomCode, keyOf(), callback);
     if (!room) return;
 
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== keyOf()) {
       return callback?.({ ok: false, message: 'Only the host can reset the game.' });
     }
 
@@ -334,19 +357,21 @@ io.on('connection', (socket) => {
     callback?.({ ok: true });
   });
 
-  socket.on('removePlayer', ({ roomCode, targetId }, callback) => {
-    const room = findRoomForSocket(roomCode, socket.id, callback);
+  socket.on('removePlayer', ({ roomCode, targetId } = {}, callback) => {
+    const room = findRoomForSocket(roomCode, keyOf(), callback);
     if (!room) return;
 
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== keyOf()) {
       return callback?.({ ok: false, message: 'Only the host can remove players.' });
     }
 
-    if (!room.players.has(targetId)) {
+    const target = [...room.players.values()].find((p) => p.publicId === targetId);
+    if (!target) {
       return callback?.({ ok: false, message: 'Player not found in this room.' });
     }
+    targetId = target.id;
 
-    if (targetId === socket.id) {
+    if (targetId === keyOf()) {
       return callback?.({ ok: false, message: 'Host cannot remove themselves.' });
     }
 
@@ -357,20 +382,20 @@ io.on('connection', (socket) => {
   socket.on('chat:typing', ({ roomCode, typing } = {}) => {
     const code = normalizeCode(roomCode);
     const room = code && ROOMS.get(code);
-    if (!room || !room.players.has(socket.id)) return;
-    const player = room.players.get(socket.id);
+    if (!room || !room.players.has(keyOf())) return;
+    const player = room.players.get(keyOf());
     socket.to(room.code).emit('chat:typing', {
-      playerId: player.id,
+      playerId: player.publicId,
       name: player.name,
       typing: Boolean(typing),
     });
   });
 
   socket.on('chat:send', ({ roomCode, text } = {}, callback) => {
-    const room = findRoomForSocket(roomCode, socket.id, callback);
+    const room = findRoomForSocket(roomCode, keyOf(), callback);
     if (!room) return;
 
-    const player = room.players.get(socket.id);
+    const player = room.players.get(keyOf());
     const message = sanitizeChatText(text);
     if (!message) {
       return callback?.({ ok: false, message: 'Message cannot be empty.' });
@@ -387,20 +412,33 @@ io.on('connection', (socket) => {
     pushChatMessage(room, {
       id: uuid(),
       type: 'user',
-      playerId: player.id,
+      playerId: player.publicId,
       name: player.name,
       text: message,
       timestamp: now,
     });
-    socket.to(room.code).emit('chat:typing', { playerId: player.id, name: player.name, typing: false });
+    socket.to(room.code).emit('chat:typing', { playerId: player.publicId, name: player.name, typing: false });
+    callback?.({ ok: true });
+  });
+
+  socket.on('leaveRoom', (_payload, callback) => {
+    leaveCurrentRoom(socket);
     callback?.({ ok: true });
   });
 
   socket.on('disconnect', () => {
-    console.log(`Client disconnected ${socket.id}`);
-    const room = findRoomByPlayer(socket.id);
-    if (!room) return;
-    removePlayerFromRoom(room, socket.id, 'Player disconnected');
+    const key = keyOf();
+    const room = findRoomByPlayer(key);
+    const player = room?.players.get(key);
+    if (!player || player.socketId !== socket.id) return; // already reconnected elsewhere
+    player.connected = false;
+    player.socketId = null;
+    io.to(room.code).emit('chat:typing', { playerId: player.publicId, name: player.name, typing: false });
+    broadcastRoom(room.code);
+    // Keep the seat for a while so a refresh or network blip doesn't lose the game.
+    clearTimeout(player.graceTimer);
+    player.graceTimer = setTimeout(() => removePlayerFromRoom(room, key, 'Player disconnected'), RECONNECT_GRACE_MS);
+    player.graceTimer.unref?.();
   });
 });
 
@@ -430,7 +468,7 @@ function advanceTurn(room) {
     // Last player loses (if no one reached 5 points)
     if (activePlayers.length === 1) {
       const loser = room.players.get(activePlayers[0]);
-      room.loser = { id: loser.id, name: loser.name };
+      room.loser = { id: loser.publicId, name: loser.name };
       io.to(room.code).emit('room:gameEnded', {
         loser: loser.name,
         winner: null,
@@ -455,9 +493,11 @@ function advanceTurn(room) {
 }
 
 function forceRemovePlayer(room, playerId, reason = 'Removed by host') {
-  if (!room.players.has(playerId)) return;
-  io.to(playerId).emit('player:kicked', reason);
-  const targetSocket = io.sockets.sockets.get(playerId);
+  const target = room.players.get(playerId);
+  if (!target) return;
+  if (target.socketId) io.to(target.socketId).emit('player:kicked', reason);
+  const targetSocket = target.socketId && io.sockets.sockets.get(target.socketId);
+  if (targetSocket) targetSocket.data.roomCode = null;
   targetSocket?.leave(room.code);
   // Remove first so the disconnect handler doesn't report it as a normal leave
   removePlayerFromRoom(room, playerId, reason);
@@ -467,9 +507,11 @@ function forceRemovePlayer(room, playerId, reason = 'Removed by host') {
 function removePlayerFromRoom(room, playerId, reason = 'Player removed') {
   if (!room.players.has(playerId)) return;
 
-  const leavingName = room.players.get(playerId)?.name;
+  const leaving = room.players.get(playerId);
+  const leavingName = leaving?.name;
+  clearTimeout(leaving?.graceTimer);
   room.players.delete(playerId);
-  io.to(room.code).emit('chat:typing', { playerId, name: leavingName, typing: false });
+  io.to(room.code).emit('chat:typing', { playerId: leaving?.publicId, name: leavingName, typing: false });
   const orderIndex = room.playerOrder.indexOf(playerId);
   if (orderIndex !== -1) {
     room.playerOrder.splice(orderIndex, 1);
@@ -586,7 +628,11 @@ function sanitizeChatText(text) {
 function createPlayer(id, name, boardSize = 5) {
   const card = generateCard(boardSize);
   return {
-    id,
+    id, // private key — never sent to other clients
+    publicId: uuid(),
+    socketId: null,
+    connected: true,
+    graceTimer: null,
     name,
     card,
     positions: mapCardPositions(card),
@@ -623,18 +669,20 @@ function broadcastRoom(roomCode) {
 
 function serializeRoom(room) {
   const currentPlayerId = room.playerOrder[room.currentTurnIndex] || null;
+  const publicOf = (key) => room.players.get(key)?.publicId || null;
   return {
     code: room.code,
     status: room.status,
-    hostId: room.hostId,
+    hostId: publicOf(room.hostId),
+    currentPlayerId: publicOf(currentPlayerId),
     boardSize: room.boardSize,
     calledNumbers: room.calledNumbers,
     winners: room.winners,
     loser: room.loser,
-    currentPlayerId,
     players: Array.from(room.players.values()).map((player) => ({
-      id: player.id,
+      id: player.publicId,
       name: player.name,
+      connected: player.connected,
       isHost: player.id === room.hostId,
       points: player.points,
       hasWon: player.hasWon,
@@ -700,3 +748,39 @@ function buildWinPatterns(size) {
   return patterns;
 }
 
+function sanitizeClientId(id) {
+  const value = String(id ?? '');
+  return /^[A-Za-z0-9_-]{8,64}$/.test(value) ? value : null;
+}
+
+// Points a socket at a player's seat (new join, refresh or reconnect).
+function attachSocket(socket, room, player, { silent = false } = {}) {
+  clearTimeout(player.graceTimer);
+  player.graceTimer = null;
+  const previous = player.socketId && player.socketId !== socket.id && io.sockets.sockets.get(player.socketId);
+  if (previous) {
+    previous.data.roomCode = null;
+    previous.data.playerKey = null;
+    previous.leave(room.code);
+    previous.emit('player:replaced');
+  }
+  player.socketId = socket.id;
+  player.connected = true;
+  socket.data.playerKey = player.id;
+  socket.data.roomCode = room.code;
+  socket.join(room.code);
+  socket.emit('player:card', player.card);
+  socket.emit('chat:history', room.chat);
+  if (!silent) broadcastRoom(room.code);
+}
+
+function leaveCurrentRoom(socket) {
+  const key = socket.data.playerKey;
+  const room = socket.data.roomCode && ROOMS.get(socket.data.roomCode);
+  if (!room || !key || !room.players.has(key)) return;
+  socket.leave(room.code);
+  socket.data.roomCode = null;
+  removePlayerFromRoom(room, key, 'Player left');
+}
+
+module.exports = { app, httpServer, io, ROOMS, buildWinPatterns, sanitizeName, normalizeCode, sanitizeClientId };
