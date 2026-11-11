@@ -162,6 +162,34 @@ elements.createRoom.addEventListener('click', () => {
   socket.emit('createRoom', { name: elements.name.value, clientId: clientId() }, handleAck);
 });
 
+const soloChoice = { bots: '1', level: 'medium' };
+document.querySelectorAll('.segmented[data-group]').forEach((group) => {
+  group.addEventListener('click', (e) => {
+    const opt = e.target.closest('.segmented__opt');
+    if (!opt) return;
+    soloChoice[group.dataset.group] = opt.dataset.value;
+    group.querySelectorAll('.segmented__opt').forEach((o) => {
+      o.classList.toggle('is-active', o === opt);
+      o.setAttribute('aria-checked', String(o === opt));
+    });
+  });
+});
+
+document.getElementById('play-computer').addEventListener('click', () => {
+  if (!rememberName()) return setStatus('Enter a display name first.', true);
+  socket.emit(
+    'playComputer',
+    {
+      name: elements.name.value,
+      clientId: clientId(),
+      bots: Number(soloChoice.bots),
+      difficulty: soloChoice.level,
+      boardSize: Number(elements.boardSizeSelect?.value) || 5,
+    },
+    handleAck
+  );
+});
+
 elements.joinRoom.addEventListener('click', () => {
   if (!rememberName()) return setStatus('Enter a display name first.', true);
   if (!elements.roomCode.value.trim()) return setStatus('Enter the room code.', true);
@@ -682,7 +710,8 @@ function toggleMark(number) {
 function renderInfo() {
   const room = state.room;
   elements.infoCode.textContent = room?.code ?? '—';
-  elements.topCode.textContent = room?.code ?? '—';
+  elements.topCode.textContent = room?.vsComputer ? `vs 🤖 ${room.botLevel || ''}` : room?.code ?? '—';
+  document.body.classList.toggle('is-bot-game', Boolean(room?.vsComputer));
   elements.playersCount.textContent = room ? String(room.players.length) : '';
   elements.calledCount.textContent = room?.calledNumbers?.length ? String(room.calledNumbers.length) : '';
   elements.infoStatus.textContent = room?.status ?? 'Not connected';
@@ -701,14 +730,18 @@ function renderInfo() {
       const points = currentPlayer.points || 0;
       elements.turnIndicator.textContent = isMyTurn
         ? `🎯 Your turn — tap a number to call it (${points}/5)`
-        : `${currentPlayer.connected === false ? '⏳' : '👤'} ${currentPlayer.name}'s turn${currentPlayer.connected === false ? ' (reconnecting…)' : ''} · ${points}/5`;
+        : currentPlayer.isBot
+          ? `${currentPlayer.name} is thinking… · ${points}/5`
+          : `${currentPlayer.connected === false ? '⏳' : '👤'} ${currentPlayer.name}'s turn${currentPlayer.connected === false ? ' (reconnecting…)' : ''} · ${points}/5`;
       elements.turnIndicator.style.display = 'block';
       elements.turnIndicator.style.color = isMyTurn ? '#34d399' : '#fbbf24';
     }
   } else if (room?.status === 'waiting') {
     const isHost = room.hostId === state.playerId;
     elements.turnIndicator.textContent =
-      room.players.length < 2
+      room.vsComputer && isHost
+        ? 'Press Start round to play again'
+        : room.players.length < 2
         ? 'Waiting for players — share the room code'
         : isHost
           ? `${room.players.length} players ready — press Start round`
@@ -749,6 +782,7 @@ function renderPlayers() {
     nameSpan.textContent = `${player.name}${player.id === state.playerId ? ' (you)' : ''}`;
 
     const parts = [];
+    if (player.isBot) parts.push('Computer');
     if (player.isHost) parts.push('Host');
     if (player.isCurrentTurn) parts.push('🎯 Turn');
     if (player.hasWon) parts.push('🏆 Won');
