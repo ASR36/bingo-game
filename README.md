@@ -41,6 +41,16 @@ npm run dev        # http://localhost:3000, restarts on change
 7. **Lose condition**: Last player standing (if others drop out) loses.
 8. The host can **remove disruptive players**, **change board size** between rounds, and **reset** whenever they’re ready for the next game.
 
+## Play with the Computer
+
+From the lobby choose **1–3 computer opponents** and a level, then tap **Play with computer**. The game starts straight away.
+
+- **Easy** calls random numbers from its card.
+- **Medium** works on its most complete line.
+- **Hard** builds several lines at once and always finishes a line when it can.
+
+Computer players only look at their own card. They run on the server, so refreshing keeps your game. Computer games are private (nobody can join by code) and close when you leave. Use **Reset game** then **Start round** for a rematch.
+
 ## Room Chat
 
 Every room has a live chat panel on the right side of the screen.

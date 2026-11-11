@@ -16,6 +16,9 @@ const CHAT_HISTORY_LIMIT = 50;
 const CHAT_MAX_LENGTH = 300;
 const CHAT_RATE_WINDOW_MS = 5000;
 const CHAT_RATE_MAX = 5;
+const BOT_LEVELS = ['easy', 'medium', 'hard'];
+const BOT_NAMES = ['Bolt 🤖', 'Pixel 🤖', 'Nova 🤖'];
+const BOT_DELAY_MS = Number(process.env.BOT_DELAY_MS) || 1200;
 const RECONNECT_GRACE_MS = Number(process.env.RECONNECT_GRACE_MS) || 60_000;
 
 // Link back to the Arena hub (set ARENA_URL on Render).
@@ -49,6 +52,38 @@ io.on('connection', (socket) => {
     if (!player) return callback?.({ ok: false, message: 'Session expired.' });
     attachSocket(socket, room, player);
     callback?.({ ok: true, room: serializeRoom(room), playerId: player.publicId, card: player.card, resumed: true });
+  });
+
+  // Play against computer players: a private room with 1–3 bots that starts right away.
+  socket.on('playComputer', ({ name, clientId, bots, difficulty, boardSize } = {}, callback) => {
+    const playerName = sanitizeName(name);
+    if (!playerName) return callback?.({ ok: false, message: 'Name is required.' });
+    const botCount = Math.min(3, Math.max(1, Number(bots) || 1));
+    const level = BOT_LEVELS.includes(difficulty) ? difficulty : 'medium';
+    const size = ALLOWED_BOARD_SIZES.includes(Number(boardSize)) ? Number(boardSize) : 5;
+
+    leaveCurrentRoom(socket);
+    const key = sanitizeClientId(clientId) || socket.id;
+    const roomCode = generateRoomCode();
+    const room = bootstrapRoom(roomCode, key);
+    room.vsComputer = true;
+    room.botLevel = level;
+    room.boardSize = size;
+    room.winPatterns = getWinPatterns(size);
+    const player = createPlayer(key, playerName, size);
+    room.players.set(key, player);
+    BOT_NAMES.slice(0, botCount).forEach((botName, i) => {
+      const bot = createPlayer(`bot-${roomCode}-${i}`, botName, size);
+      bot.isBot = true;
+      bot.connected = true;
+      room.players.set(bot.id, bot);
+    });
+    ROOMS.set(roomCode, room);
+
+    attachSocket(socket, room, player, { silent: true });
+    pushSystemMessage(room, `${player.name} vs ${botCount} computer player${botCount > 1 ? 's' : ''} (${level}).`);
+    startRound(room);
+    callback?.({ ok: true, room: serializeRoom(room), playerId: player.publicId });
   });
 
   socket.on('createRoom', ({ name, clientId } = {}, callback) => {
@@ -91,6 +126,10 @@ io.on('connection', (socket) => {
       const existing = room.players.get(key);
       attachSocket(socket, room, existing);
       return callback?.({ ok: true, room: serializeRoom(room), playerId: existing.publicId, resumed: true });
+    }
+
+    if (room.vsComputer) {
+      return callback?.({ ok: false, message: 'That is a game against the computer.' });
     }
 
     if (room.status === 'running' || room.status === 'ended') {
@@ -150,7 +189,7 @@ io.on('connection', (socket) => {
       player.completedLines = new Set();
       player.hasWon = false;
       player.isEliminated = false;
-      io.to(player.socketId).emit('player:card', player.card);
+      if (player.socketId) io.to(player.socketId).emit('player:card', player.card);
     }
 
     broadcastRoom(room.code);
@@ -169,27 +208,7 @@ io.on('connection', (socket) => {
       return callback?.({ ok: false, message: 'Need at least 2 players to start.' });
     }
 
-    resetRoom(room);
-    room.status = 'running';
-    room.winPatterns = getWinPatterns(room.boardSize || 5);
-    room.playerOrder = Array.from(room.players.keys());
-    shuffleArray(room.playerOrder);
-    room.currentTurnIndex = 0;
-    room.loser = null;
-
-    for (const player of room.players.values()) {
-      const newCard = generateCard(room.boardSize || 5);
-      player.card = newCard;
-      player.positions = mapCardPositions(newCard);
-      player.marked.clear();
-      player.points = 0;
-      player.completedLines.clear();
-      player.hasWon = false;
-      player.isEliminated = false;
-      io.to(player.socketId).emit('player:card', player.card);
-    }
-
-    broadcastRoom(room.code);
+    startRound(room);
     callback?.({ ok: true });
   });
 
@@ -257,14 +276,7 @@ io.on('connection', (socket) => {
       return callback?.({ ok: false, message: 'That number is already called.' });
     }
 
-    // Add number to called list
-    room.calledNumbers.push(numeric);
-    io.to(room.code).emit('number:called', numeric);
-
-    // Advance turn to next active player
-    advanceTurn(room);
-
-    broadcastRoom(room.code);
+    callNumber(room, numeric);
     callback?.({ ok: true, number: numeric });
   });
 
@@ -278,68 +290,7 @@ io.on('connection', (socket) => {
     const player = room.players.get(keyOf());
     if (!player || player.isEliminated || player.hasWon) return;
 
-    const winPatterns = room.winPatterns || getWinPatterns(room.boardSize || 5);
-
-    // Update player's marked numbers (only called numbers can be marked)
-    const calledSet = new Set(room.calledNumbers);
-    const validMarks = (Array.isArray(markedNumbers) ? markedNumbers : []).filter(
-      (n) => player.positions.has(n) && calledSet.has(n)
-    );
-    player.marked = new Set(validMarks);
-
-    // Check for newly completed lines (Auto-Scoring)
-    const markIndices = validMarks.map((n) => player.positions.get(n));
-    const markSet = new Set(markIndices);
-    const newLines = checkNewLines(player, markSet, winPatterns);
-
-    if (newLines.length > 0) {
-      player.points += newLines.length;
-      newLines.forEach(lineIndex => player.completedLines.add(lineIndex));
-
-      io.to(room.code).emit('room:pointsEarned', {
-        player: player.name,
-        points: player.points,
-        linesCompleted: newLines.length
-      });
-
-      // Check for win condition (5 points)
-      if (player.points >= 5 && !player.hasWon) {
-        player.hasWon = true;
-        const rank = room.winners.length + 1;
-        room.winners.push({
-          id: player.publicId,
-          name: player.name,
-          rank,
-          timestamp: Date.now()
-        });
-
-        io.to(room.code).emit('room:playerWon', {
-          player: player.name,
-          rank,
-          winners: room.winners
-        });
-
-        // Check if game should end (only 1 player left)
-        const activePlayers = room.playerOrder.filter(
-          (id) => room.players.has(id) && !room.players.get(id).isEliminated && !room.players.get(id).hasWon
-        );
-
-        if (activePlayers.length <= 1) {
-          // Game Over
-          const loserId = activePlayers[0];
-          const loser = room.players.get(loserId);
-          if (loser) {
-            room.loser = { id: loser.publicId, name: loser.name };
-          }
-          room.status = 'ended';
-          io.to(room.code).emit('room:gameEnded', {
-            loser: loser?.name,
-            winners: room.winners
-          });
-        }
-      }
-    }
-
+    applyMarks(room, player, markedNumbers);
     broadcastRoom(room.code);
   });
 
@@ -442,7 +393,169 @@ io.on('connection', (socket) => {
   });
 });
 
+// Records a player's marks and awards points for newly completed lines.
+// Shared by people (who send their marks) and computer players (marked by the server).
+function applyMarks(room, player, markedNumbers) {
+  const winPatterns = room.winPatterns || getWinPatterns(room.boardSize || 5);
+
+  // Update player's marked numbers (only called numbers can be marked)
+  const calledSet = new Set(room.calledNumbers);
+  const validMarks = (Array.isArray(markedNumbers) ? markedNumbers : [...markedNumbers || []]).filter(
+    (n) => player.positions.has(n) && calledSet.has(n)
+  );
+  player.marked = new Set(validMarks);
+
+  // Check for newly completed lines (Auto-Scoring)
+  const markIndices = validMarks.map((n) => player.positions.get(n));
+  const markSet = new Set(markIndices);
+  const newLines = checkNewLines(player, markSet, winPatterns);
+
+  if (newLines.length > 0) {
+    player.points += newLines.length;
+    newLines.forEach(lineIndex => player.completedLines.add(lineIndex));
+
+    io.to(room.code).emit('room:pointsEarned', {
+      player: player.name,
+      points: player.points,
+      linesCompleted: newLines.length
+    });
+
+    // Check for win condition (5 points)
+    if (player.points >= 5 && !player.hasWon) {
+      player.hasWon = true;
+      const rank = room.winners.length + 1;
+      room.winners.push({
+        id: player.publicId,
+        name: player.name,
+        rank,
+        timestamp: Date.now()
+      });
+
+      io.to(room.code).emit('room:playerWon', {
+        player: player.name,
+        rank,
+        winners: room.winners
+      });
+
+      // Check if game should end (only 1 player left)
+      const activePlayers = room.playerOrder.filter(
+        (id) => room.players.has(id) && !room.players.get(id).isEliminated && !room.players.get(id).hasWon
+      );
+
+      if (activePlayers.length <= 1) {
+        // Game Over
+        const loserId = activePlayers[0];
+        const loser = room.players.get(loserId);
+        if (loser) {
+          room.loser = { id: loser.publicId, name: loser.name };
+        }
+        room.status = 'ended';
+        io.to(room.code).emit('room:gameEnded', {
+          loser: loser?.name,
+          winners: room.winners
+        });
+      }
+    }
+  }
+}
+
+function startRound(room) {
+  resetRoom(room);
+  room.status = 'running';
+  room.winPatterns = getWinPatterns(room.boardSize || 5);
+  room.playerOrder = Array.from(room.players.keys());
+  shuffleArray(room.playerOrder);
+  room.currentTurnIndex = 0;
+  room.loser = null;
+
+  for (const player of room.players.values()) {
+    const newCard = generateCard(room.boardSize || 5);
+    player.card = newCard;
+    player.positions = mapCardPositions(newCard);
+    player.marked.clear();
+    player.points = 0;
+    player.completedLines.clear();
+    player.hasWon = false;
+    player.isEliminated = false;
+    if (player.socketId) io.to(player.socketId).emit('player:card', player.card);
+  }
+  broadcastRoom(room.code);
+  scheduleBotTurn(room);
+}
+
+// Calls a number for the room: everyone with it gets it marked (computer players
+// immediately; people mark it in their browser), then the turn moves on.
+function callNumber(room, number) {
+  room.calledNumbers.push(number);
+  io.to(room.code).emit('number:called', number);
+  for (const bot of room.players.values()) {
+    if (bot.isBot && !bot.hasWon && bot.positions.has(number)) {
+      applyMarks(room, bot, [...bot.marked, number]);
+    }
+  }
+  if (room.status === 'running') advanceTurn(room);
+  broadcastRoom(room.code);
+  scheduleBotTurn(room);
+}
+
+// If it's a computer player's turn, make its move after a short "thinking" pause.
+function scheduleBotTurn(room) {
+  clearTimeout(room.botTimer);
+  if (room.status !== 'running') return;
+  const currentId = room.playerOrder[room.currentTurnIndex];
+  const bot = room.players.get(currentId);
+  if (!bot?.isBot) return;
+  const delay = BOT_DELAY_MS + Math.floor(Math.random() * (BOT_DELAY_MS / 2));
+  room.botTimer = setTimeout(() => {
+    if (!ROOMS.has(room.code) || room.status !== 'running') return;
+    if (room.playerOrder[room.currentTurnIndex] !== bot.id) return;
+    const number = chooseBotNumber(room, bot);
+    if (number == null) {
+      advanceTurn(room);
+      broadcastRoom(room.code);
+      scheduleBotTurn(room);
+      return;
+    }
+    callNumber(room, number);
+  }, delay);
+  room.botTimer.unref?.();
+}
+
+// Easy: random. Medium: push its most-complete line. Hard: build several lines at once
+// and always finish a line when it can. Bots only look at their own card.
+function chooseBotNumber(room, bot) {
+  const called = new Set(room.calledNumbers);
+  const options = bot.card.filter((n) => !called.has(n));
+  if (!options.length) return null;
+  const level = room.botLevel || 'medium';
+  if (level === 'easy') return options[Math.floor(Math.random() * options.length)];
+
+  const size = room.boardSize || 5;
+  const patterns = room.winPatterns || getWinPatterns(size);
+  const markedIdx = new Set([...bot.marked].map((n) => bot.positions.get(n)));
+  let best = -Infinity;
+  let choices = [];
+  for (const n of options) {
+    const idx = bot.positions.get(n);
+    let score = 0;
+    patterns.forEach((pattern, i) => {
+      if (bot.completedLines.has(i) || !pattern.includes(idx)) return;
+      const have = pattern.filter((cell) => markedIdx.has(cell)).length;
+      if (level === 'medium') score = Math.max(score, have);
+      else score += have * have + (have === size - 1 ? 1000 : 0);
+    });
+    if (score > best) {
+      best = score;
+      choices = [n];
+    } else if (score === best) {
+      choices.push(n);
+    }
+  }
+  return choices[Math.floor(Math.random() * choices.length)];
+}
+
 function resetRoom(room) {
+  clearTimeout(room.botTimer);
   room.calledNumbers = [];
   room.winners = [];
   room.playerOrder = [];
@@ -511,6 +624,12 @@ function removePlayerFromRoom(room, playerId, reason = 'Player removed') {
   const leavingName = leaving?.name;
   clearTimeout(leaving?.graceTimer);
   room.players.delete(playerId);
+  // A computer game ends when its last person leaves.
+  if (![...room.players.values()].some((p) => !p.isBot)) {
+    clearTimeout(room.botTimer);
+    ROOMS.delete(room.code);
+    return;
+  }
   io.to(room.code).emit('chat:typing', { playerId: leaving?.publicId, name: leavingName, typing: false });
   const orderIndex = room.playerOrder.indexOf(playerId);
   if (orderIndex !== -1) {
@@ -540,6 +659,7 @@ function removePlayerFromRoom(room, playerId, reason = 'Player removed') {
   if (room.status === 'running') {
     advanceTurn(room);
   }
+  scheduleBotTurn(room);
 
   broadcastRoom(room.code);
 }
@@ -674,6 +794,8 @@ function serializeRoom(room) {
     code: room.code,
     status: room.status,
     hostId: publicOf(room.hostId),
+    vsComputer: Boolean(room.vsComputer),
+    botLevel: room.botLevel || null,
     currentPlayerId: publicOf(currentPlayerId),
     boardSize: room.boardSize,
     calledNumbers: room.calledNumbers,
@@ -683,6 +805,7 @@ function serializeRoom(room) {
       id: player.publicId,
       name: player.name,
       connected: player.connected,
+      isBot: Boolean(player.isBot),
       isHost: player.id === room.hostId,
       points: player.points,
       hasWon: player.hasWon,
@@ -783,4 +906,4 @@ function leaveCurrentRoom(socket) {
   removePlayerFromRoom(room, key, 'Player left');
 }
 
-module.exports = { app, httpServer, io, ROOMS, buildWinPatterns, sanitizeName, normalizeCode, sanitizeClientId };
+module.exports = { app, httpServer, io, ROOMS, chooseBotNumber, buildWinPatterns, sanitizeName, normalizeCode, sanitizeClientId };

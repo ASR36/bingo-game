@@ -57,6 +57,29 @@
         <input id="room-code" class="code-input" placeholder="CODE" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code" />
         <button id="join-room" class="btn btn--join" type="button">Join room</button>
       </div>
+      <div class="divider"><span>or play the computer</span></div>
+
+      <div class="solo">
+        <div class="solo__row">
+          <span class="solo__label">Opponents</span>
+          <div class="segmented" role="radiogroup" aria-label="Number of computer opponents" data-group="bots">
+            <button type="button" class="segmented__opt is-active" data-value="1" role="radio" aria-checked="true">1</button>
+            <button type="button" class="segmented__opt" data-value="2" role="radio" aria-checked="false">2</button>
+            <button type="button" class="segmented__opt" data-value="3" role="radio" aria-checked="false">3</button>
+          </div>
+        </div>
+        <div class="solo__row">
+          <span class="solo__label">Level</span>
+          <div class="segmented" role="radiogroup" aria-label="Computer difficulty" data-group="level">
+            <button type="button" class="segmented__opt" data-value="easy" role="radio" aria-checked="false">Easy</button>
+            <button type="button" class="segmented__opt is-active" data-value="medium" role="radio" aria-checked="true">Medium</button>
+            <button type="button" class="segmented__opt" data-value="hard" role="radio" aria-checked="false">Hard</button>
+          </div>
+        </div>
+        <button id="play-computer" class="btn btn--bot btn--block" type="button">
+          <span aria-hidden="true">🤖</span> Play with computer
+        </button>
+      </div>
       <p id="status" class="form-status" role="status" aria-live="polite"></p>
     </section>
   </main>
