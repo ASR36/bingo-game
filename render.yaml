@@ -1,11 +1,17 @@
+# Render Blueprint — production only (free plan). Deploys main after CI passes.
 services:
   - type: web
     name: bingo-game
     runtime: node
     plan: free
-    buildCommand: npm install
+    region: oregon
+    branch: main
+    buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /healthz
+    autoDeployTrigger: checksPass
     envVars:
       - key: NODE_VERSION
-        value: "20"
+        value: "22"
+      - key: ARENA_URL
+        sync: false

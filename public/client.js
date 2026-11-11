@@ -1,4 +1,40 @@
-const socket = io();
+const socket = io({ reconnectionDelayMax: 4000 });
+
+/* ---------------- Session (survives refresh) ---------------- */
+const SESSION_KEY = 'bingo.session';
+const NAME_KEY = 'bingo.name';
+const safeStore = {
+  get(store, key) {
+    try { return store.getItem(key); } catch { return null; }
+  },
+  set(store, key, value) {
+    try { store.setItem(key, value); } catch { /* private mode */ }
+  },
+  remove(store, key) {
+    try { store.removeItem(key); } catch { /* private mode */ }
+  },
+};
+function readSession() {
+  try { return JSON.parse(safeStore.get(sessionStorage, SESSION_KEY) || 'null'); } catch { return null; }
+}
+// One stable id per browser tab, so refreshing the tab keeps your seat.
+function clientId() {
+  const saved = readSession();
+  if (saved?.clientId) return saved.clientId;
+  if (!window.__bingoClientId) {
+    const raw = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    window.__bingoClientId = raw.replace(/[^A-Za-z0-9_-]/g, '');
+  }
+  return window.__bingoClientId;
+}
+function saveSession(code) {
+  safeStore.set(sessionStorage, SESSION_KEY, JSON.stringify({ code, clientId: clientId() }));
+  history.replaceState(null, '', `?room=${code}`);
+}
+function clearSession() {
+  safeStore.remove(sessionStorage, SESSION_KEY);
+  history.replaceState(null, '', location.pathname);
+}
 
 const elements = {
   name: document.getElementById('player-name'),
@@ -31,7 +67,73 @@ const elements = {
   chatBadge: document.getElementById('chat-badge'),
   chatBackdrop: document.getElementById('chat-backdrop'),
   chatTyping: document.getElementById('chat-typing'),
+  leaveRoom: document.getElementById('leave-room'),
+  topCode: document.getElementById('top-code'),
+  copyInvite: document.getElementById('copy-invite'),
+  arenaLink: document.getElementById('arena-link'),
+  toast: document.getElementById('toast'),
+  side: document.querySelector('.side'),
+  playersCount: document.getElementById('players-count'),
+  calledCount: document.getElementById('called-count'),
 };
+
+/* ---------------- Boot ---------------- */
+if (window.APP_CONFIG?.arenaUrl) {
+  elements.arenaLink.href = window.APP_CONFIG.arenaUrl;
+  elements.arenaLink.hidden = false;
+}
+elements.name.value = safeStore.get(localStorage, NAME_KEY) || '';
+{
+  const params = new URLSearchParams(location.search);
+  if (params.get('room')) elements.roomCode.value = params.get('room').toUpperCase().slice(0, 6);
+}
+elements.side.dataset.active = 'leaderboard';
+document.querySelectorAll('.pane-tab').forEach((tab) =>
+  tab.addEventListener('click', () => {
+    elements.side.dataset.active = tab.dataset.pane;
+    document.querySelectorAll('.pane-tab').forEach((t) => {
+      t.classList.toggle('is-active', t === tab);
+      t.setAttribute('aria-selected', String(t === tab));
+    });
+  })
+);
+elements.roomCode.addEventListener('input', () => {
+  elements.roomCode.value = elements.roomCode.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+});
+elements.roomCode.addEventListener('keydown', (e) => e.key === 'Enter' && elements.joinRoom.click());
+elements.name.addEventListener('keydown', (e) => e.key === 'Enter' && (elements.roomCode.value ? elements.joinRoom : elements.createRoom).click());
+
+elements.leaveRoom.addEventListener('click', () => {
+  if (!confirm('Leave this room?')) return;
+  socket.emit('leaveRoom', {}, () => {});
+  clearSession();
+  window.location.reload();
+});
+
+elements.copyInvite.addEventListener('click', async () => {
+  if (!state.room) return;
+  const url = `${location.origin}${location.pathname}?room=${state.room.code}`;
+  try {
+    if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+      await navigator.share({ title: 'Join my Bingo room', url });
+    } else {
+      await navigator.clipboard.writeText(url);
+      toast('Invite link copied');
+    }
+  } catch {
+    /* share sheet dismissed */
+  }
+});
+
+let toastTimer = null;
+function toast(text, isError = false) {
+  if (!text) return;
+  elements.toast.textContent = text;
+  elements.toast.classList.toggle('is-error', isError);
+  elements.toast.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => elements.toast.classList.remove('is-visible'), 2800);
+}
 
 const state = {
   playerId: null,
@@ -49,14 +151,23 @@ const chatDrawerQuery = window.matchMedia('(max-width: 1199px)');
 
 const winPatternCache = new Map();
 
+function rememberName() {
+  const name = elements.name.value.trim();
+  if (name) safeStore.set(localStorage, NAME_KEY, name);
+  return name;
+}
+
 elements.createRoom.addEventListener('click', () => {
-  socket.emit('createRoom', { name: elements.name.value }, handleAck);
+  if (!rememberName()) return setStatus('Enter a display name first.', true);
+  socket.emit('createRoom', { name: elements.name.value, clientId: clientId() }, handleAck);
 });
 
 elements.joinRoom.addEventListener('click', () => {
+  if (!rememberName()) return setStatus('Enter a display name first.', true);
+  if (!elements.roomCode.value.trim()) return setStatus('Enter the room code.', true);
   socket.emit(
     'joinRoom',
-    { name: elements.name.value, roomCode: elements.roomCode.value },
+    { name: elements.name.value, roomCode: elements.roomCode.value, clientId: clientId() },
     handleAck
   );
 });
@@ -108,9 +219,6 @@ socket.on('number:called', (number) => {
 
 socket.on('room:update', (room) => {
   state.room = room;
-  if (!state.playerId && room.players.find((p) => p.id === socket.id)) {
-    state.playerId = socket.id;
-  }
 
   // Sync marked numbers from server
   const myPlayer = room.players.find((p) => p.id === state.playerId);
@@ -178,7 +286,14 @@ socket.on('connect_error', () => {
 });
 
 socket.on('player:kicked', (reason) => {
+  clearSession();
   alert(reason || 'You were removed from the room by the host.');
+  window.location.reload();
+});
+
+socket.on('player:replaced', () => {
+  alert('This game was opened in another tab.');
+  clearSession();
   window.location.reload();
 });
 
@@ -282,10 +397,25 @@ socket.on('chat:message', (message) => {
 
 socket.on('disconnect', () => {
   updateChatControls();
+  if (state.room) toast('Connection lost — reconnecting…', true);
 });
 
 socket.on('connect', () => {
   updateChatControls();
+  // Rejoin the same seat after a refresh or a dropped connection.
+  const saved = readSession();
+  if (!saved) return;
+  socket.emit('resumeRoom', { roomCode: saved.code, clientId: saved.clientId }, (response) => {
+    if (response?.ok) {
+      handleAck(response);
+    } else {
+      clearSession();
+      if (state.room) {
+        alert('Your seat in the room has expired.');
+        window.location.reload();
+      }
+    }
+  });
 });
 
 elements.chatForm.addEventListener('submit', (event) => {
@@ -421,9 +551,11 @@ function handleAck(response) {
   if (response.ok) {
     setStatus('');
     if (response.room) {
-      state.playerId = response.playerId ?? state.playerId ?? socket.id;
+      state.playerId = response.playerId ?? state.playerId;
       state.room = response.room;
       elements.roomCode.value = response.room.code;
+      saveSession(response.room.code);
+      if (response.resumed) toast('Welcome back — you’re still in the game.');
       renderInfo();
       renderPlayers();
       updateControls();
@@ -550,6 +682,9 @@ function toggleMark(number) {
 function renderInfo() {
   const room = state.room;
   elements.infoCode.textContent = room?.code ?? '—';
+  elements.topCode.textContent = room?.code ?? '—';
+  elements.playersCount.textContent = room ? String(room.players.length) : '';
+  elements.calledCount.textContent = room?.calledNumbers?.length ? String(room.calledNumbers.length) : '';
   elements.infoStatus.textContent = room?.status ?? 'Not connected';
   const hostId = room?.hostId;
   const hostName = room ? room.players.find((p) => p.id === hostId)?.name : undefined;
@@ -565,11 +700,25 @@ function renderInfo() {
       const isMyTurn = room.currentPlayerId === state.playerId;
       const points = currentPlayer.points || 0;
       elements.turnIndicator.textContent = isMyTurn
-        ? `🎯 Your Turn! (${points}/5 points)`
-        : `👤 ${currentPlayer.name}'s Turn (${points}/5 points)`;
+        ? `🎯 Your turn — tap a number to call it (${points}/5)`
+        : `${currentPlayer.connected === false ? '⏳' : '👤'} ${currentPlayer.name}'s turn${currentPlayer.connected === false ? ' (reconnecting…)' : ''} · ${points}/5`;
       elements.turnIndicator.style.display = 'block';
       elements.turnIndicator.style.color = isMyTurn ? '#34d399' : '#fbbf24';
     }
+  } else if (room?.status === 'waiting') {
+    const isHost = room.hostId === state.playerId;
+    elements.turnIndicator.textContent =
+      room.players.length < 2
+        ? 'Waiting for players — share the room code'
+        : isHost
+          ? `${room.players.length} players ready — press Start round`
+          : 'Waiting for the host to start';
+    elements.turnIndicator.style.display = 'block';
+    elements.turnIndicator.style.color = '#9ea6c2';
+  } else if (room?.status === 'ended') {
+    elements.turnIndicator.textContent = '🏁 Game over — see the leaderboard';
+    elements.turnIndicator.style.display = 'block';
+    elements.turnIndicator.style.color = '#ffc94a';
   } else {
     elements.turnIndicator.style.display = 'none';
   }
@@ -589,43 +738,36 @@ function renderPlayers() {
 
   sortedPlayers.forEach((player) => {
     const li = document.createElement('li');
-    const isCurrentTurn = player.isCurrentTurn;
-    const isEliminated = player.isEliminated;
-    const points = player.points || 0;
-    let status = '';
-    if (isEliminated) {
-      status = '❌ Eliminated';
-    } else if (isCurrentTurn) {
-      status = '🎯 Your Turn';
-    }
+    if (player.isCurrentTurn) li.classList.add('is-turn');
+
+    const dot = document.createElement('span');
+    dot.className = `player__dot${player.connected === false ? ' is-off' : ''}`;
+    dot.title = player.connected === false ? 'Reconnecting…' : 'Online';
 
     const nameSpan = document.createElement('span');
+    nameSpan.className = 'player__name';
     nameSpan.textContent = `${player.name}${player.id === state.playerId ? ' (you)' : ''}`;
 
+    const parts = [];
+    if (player.isHost) parts.push('Host');
+    if (player.isCurrentTurn) parts.push('🎯 Turn');
+    if (player.hasWon) parts.push('🏆 Won');
+    if (player.isEliminated) parts.push('Out');
+    if (player.connected === false) parts.push('Reconnecting');
     const metaSpan = document.createElement('span');
-    metaSpan.innerHTML = `
-      ${player.isHost ? 'Host · ' : ''}
-      ${points > 0 ? `⭐ ${points}/5 · ` : ''}
-      ${status}
-    `;
+    metaSpan.className = 'player__meta';
+    metaSpan.textContent = parts.join(' · ');
 
-    li.appendChild(nameSpan);
-    li.appendChild(metaSpan);
+    li.append(dot, nameSpan, metaSpan);
 
     if (state.room?.hostId === state.playerId && player.id !== state.playerId) {
       const removeBtn = document.createElement('button');
       removeBtn.className = 'player-remove';
       removeBtn.textContent = 'Remove';
-      removeBtn.addEventListener('click', () => removePlayer(player.id));
+      removeBtn.addEventListener('click', () => {
+        if (confirm(`Remove ${player.name} from the room?`)) removePlayer(player.id);
+      });
       li.appendChild(removeBtn);
-    }
-
-    if (isEliminated) {
-      li.style.opacity = '0.6';
-      li.style.textDecoration = 'line-through';
-    } else if (player.hasWon) {
-      li.style.background = 'rgba(34, 197, 94, 0.3)';
-      li.style.fontWeight = 'bold';
     }
 
     ul.appendChild(li);
@@ -651,36 +793,52 @@ function renderCalledNumbers() {
 function renderWinners() {
   const list = elements.winners;
   list.innerHTML = '';
-  const players = [...(state.room?.players ?? [])];
+  const room = state.room;
+  const players = [...(room?.players ?? [])];
+  const rankOf = new Map((room?.winners ?? []).map((w) => [w.id, w.rank]));
 
-  // Sort by points (descending), then by name
+  // Finished players by finishing order, then everyone else by points.
   players.sort((a, b) => {
-    const pointsA = a.points || 0;
-    const pointsB = b.points || 0;
-    if (pointsB !== pointsA) return pointsB - pointsA;
-    return a.name.localeCompare(b.name);
+    const ra = rankOf.get(a.id) ?? 99;
+    const rb = rankOf.get(b.id) ?? 99;
+    if (ra !== rb) return ra - rb;
+    const diff = (b.points || 0) - (a.points || 0);
+    return diff || a.name.localeCompare(b.name);
   });
 
-  if (players.length === 0) {
-    list.innerHTML = '<li style="opacity: 0.6;">No players yet</li>';
+  if (!players.length) {
+    list.innerHTML = '<li class="lb-empty">No players yet</li>';
     return;
   }
 
+  const medals = ['🥇', '🥈', '🥉'];
   players.forEach((player, index) => {
+    const rank = rankOf.get(player.id);
+    const isLoser = room?.loser?.id === player.id;
     const li = document.createElement('li');
-    const points = player.points || 0;
-    const isWinner = player.hasWon;
-    const isLoser = state.room?.loser?.id === player.id;
-    let display = `${index + 1}. ${player.name} - ${points}/5 points`;
-    if (isWinner) {
-      display = `🏆 ${display} - WINNER!`;
-      li.style.color = '#34d399';
-      li.style.fontWeight = 'bold';
-    } else if (isLoser) {
-      display = `❌ ${display} - Better Luck Next Time!`;
-      li.style.color = '#ef4444';
-    }
-    li.textContent = display;
+    li.className = 'lb-row' + (player.id === state.playerId ? ' is-me' : '') + (rank ? ' is-winner' : '') + (isLoser ? ' is-loser' : '');
+
+    const rankEl = document.createElement('span');
+    rankEl.className = 'lb-row__rank';
+    rankEl.textContent = rank ? medals[rank - 1] || `#${rank}` : index + 1;
+
+    const name = document.createElement('span');
+    name.className = 'lb-row__name';
+    name.textContent = `${player.name}${player.id === state.playerId ? ' (you)' : ''}`;
+    const tag = document.createElement('span');
+    tag.className = 'lb-row__tag';
+    tag.textContent = rank ? `Finished #${rank}` : isLoser ? 'Last standing' : player.isCurrentTurn ? 'Their turn' : '';
+    if (tag.textContent) name.appendChild(tag);
+
+    const pts = document.createElement('span');
+    pts.className = 'lb-row__pts';
+    pts.innerHTML = `${player.points || 0}<small>/5</small>`;
+
+    const bar = document.createElement('span');
+    bar.className = 'lb-row__bar';
+    bar.style.setProperty('--p', Math.min(1, (player.points || 0) / 5));
+
+    li.append(rankEl, name, pts, bar);
     list.appendChild(li);
   });
 }
@@ -692,6 +850,8 @@ function updateControls() {
   document.body.classList.toggle('in-room', connected);
 
   elements.startGame.disabled = !(connected && isHost && room?.status === 'waiting');
+  // Only the host needs this button, and only before a round starts.
+  elements.startGame.style.display = connected && isHost && room?.status === 'waiting' ? '' : 'none';
 
   if (elements.resetAfterGame) {
     elements.resetAfterGame.style.display = (connected && isHost) ? 'inline-block' : 'none';
@@ -780,6 +940,8 @@ function buildWinPatterns(size) {
 function setStatus(message, isError = false) {
   if (elements.status) {
     elements.status.textContent = message;
-    elements.status.style.color = isError ? '#ef4444' : '#10b981';
+    elements.status.style.color = isError ? '#ff8aa5' : '#3ddc97';
   }
+  // In a room the lobby form is hidden, so show messages as a toast instead.
+  if (state.room && message) toast(message, isError);
 }

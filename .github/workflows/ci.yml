@@ -1,0 +1,31 @@
+# CI gates CD: Render deploys main only after these checks pass
+# (render.yaml → autoDeployTrigger: checksPass). dev and uat are for testing in git only.
+name: CI/CD
+
+on:
+  push:
+    branches: [main, uat, dev]
+  pull_request:
+    branches: [main, uat, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test

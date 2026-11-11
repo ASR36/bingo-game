@@ -3,91 +3,130 @@
 
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#06070d" />
+  <meta name="description" content="Play Bingo with friends in your browser — create a room, share the code, take turns calling numbers." />
   <title>Bingo</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23102a3a'/%3E%3Crect x='6' y='6' width='9' height='9' rx='2' fill='%233ddc97'/%3E%3Crect x='17' y='17' width='9' height='9' rx='2' fill='%233ddc97'/%3E%3Crect x='17' y='6' width='9' height='9' rx='2' fill='%235aa9ff'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
 </head>
 
 <body>
-  <main class="app">
-    <section class="panel panel--left">
-      <h1>Bingo</h1>
+  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
 
-      <div class="form">
-        <label>
-          Display Name
-          <input id="player-name" maxlength="20" placeholder="Enter your name" />
-        </label>
-        <label>
-          Room Code
-          <input id="room-code" placeholder="Enter code (e.g. ABCD)" maxlength="6" />
-        </label>
-        <div class="actions">
-          <button id="create-room">Create Room</button>
-          <button id="join-room" class="secondary">Join Room</button>
-        </div>
-        <p id="status" class="status"></p>
-      </div>
+  <header class="topbar">
+    <a id="arena-link" class="topbar__back" href="#" hidden>
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Arena
+    </a>
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span class="brand__name">Bingo</span>
+    </div>
+    <div class="topbar__room in-room-only">
+      <span class="topbar__code-label">Room</span>
+      <strong id="top-code" class="topbar__code">—</strong>
+      <button id="copy-invite" class="btn btn--glass btn--sm" type="button" aria-label="Copy invite link">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M10 14a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1M14 10a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Invite</span>
+      </button>
+    </div>
+  </header>
 
-      <div class="panel__section">
-        <h2>Game Settings</h2>
-        <label>
-          Board Size
-          <select id="board-size" class="board-size-select">
-            <option value="5">5 × 5 (Standard)</option>
-            <option value="6">6 × 6 (Large)</option>
-            <option value="10">10 × 10 (Epic)</option>
-          </select>
-        </label>
-        <p class="hint">Only the host can change size while waiting.</p>
-      </div>
-
-      <div class="panel__section" id="room-info">
-        <h2>Room Info</h2>
-        <div class="info-grid">
-          <p>Code: <strong id="info-code" style="color: var(--primary-color)">—</strong></p>
-          <p>Status: <strong id="info-status">Not connected</strong></p>
-          <p>Host: <strong id="info-host">—</strong></p>
-          <p>Size: <strong id="info-board-size">5 × 5</strong></p>
-        </div>
-        <p id="turn-indicator" class="turn-indicator"></p>
-      </div>
-
-      <div class="panel__section">
-        <h2>Leaderboard</h2>
-        <ol id="winners" class="winners"></ol>
-        <div id="loser-section" style="display: none; margin-top: 0.5rem;">
-          <p id="loser-name" class="loser-name" style="color: var(--danger-color); font-weight: bold;"></p>
-        </div>
-      </div>
-
-      <div class="panel__section">
-        <h2>Players</h2>
-        <ul id="players" class="player-list"></ul>
-      </div>
-
-      <div class="panel__section">
-        <h2>Called Numbers</h2>
-        <div id="called-numbers" class="number-grid"></div>
-      </div>
+  <!-- ============ Lobby (not in a room) ============ -->
+  <main id="lobby" class="lobby lobby-only">
+    <section class="hero">
+      <p class="eyebrow">Party game · Real-time</p>
+      <h1>Call it.<br /><span>Mark it. Bingo!</span></h1>
+      <p class="hero__lead">Everyone gets their own card. Take turns calling numbers from it — complete 5 lines first to win.</p>
     </section>
 
-    <section class="panel panel--center">
-      <div class="controls">
-        <button id="start-game" disabled>Start Round</button>
-        <button id="reset-after-game" class="secondary" disabled style="display: none;">Reset Game</button>
+    <section class="glass lobby__card" aria-label="Create or join a room">
+      <label class="field">
+        <span>Display name</span>
+        <input id="player-name" maxlength="20" autocomplete="nickname" placeholder="What should we call you?" />
+      </label>
+      <button id="create-room" class="btn btn--primary btn--block" type="button">Create a room</button>
+
+      <div class="divider"><span>or join a friend</span></div>
+
+      <div class="join">
+        <input id="room-code" class="code-input" placeholder="CODE" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code" />
+        <button id="join-room" class="btn btn--join" type="button">Join room</button>
       </div>
-      <div class="card-container">
+      <p id="status" class="form-status" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <!-- ============ Game (in a room) ============ -->
+  <main class="app in-room-only">
+    <section class="stage">
+      <p id="turn-indicator" class="turn-banner" role="status" aria-live="polite"></p>
+
+      <div class="card-container glass">
         <div id="bingo-card" class="card"></div>
       </div>
+
+      <div class="controls">
+        <button id="start-game" class="btn btn--primary" type="button" disabled>Start round</button>
+        <button id="reset-after-game" class="btn btn--glass" type="button" disabled style="display: none;">Reset game</button>
+        <button id="leave-room" class="btn btn--ghost" type="button">Leave</button>
+      </div>
+      <p class="rules-hint">Tap a number on your turn to call it. Called numbers are marked for everyone who has them. 5 lines = win.</p>
     </section>
 
-    <aside class="panel panel--chat" id="chat-panel" aria-label="Room chat">
+    <aside class="side" aria-label="Room details">
+      <nav class="pane-tabs" role="tablist" aria-label="Room panels">
+        <button class="pane-tab is-active" data-pane="leaderboard" role="tab" aria-selected="true">Leaderboard</button>
+        <button class="pane-tab" data-pane="players" role="tab" aria-selected="false">Players <span id="players-count" class="pane-tab__count"></span></button>
+        <button class="pane-tab" data-pane="called" role="tab" aria-selected="false">Called <span id="called-count" class="pane-tab__count"></span></button>
+        <button class="pane-tab" data-pane="room" role="tab" aria-selected="false">Room</button>
+      </nav>
+
+      <section class="glass pane" data-pane="leaderboard">
+        <h2>Leaderboard</h2>
+        <ol id="winners" class="leaderboard"></ol>
+        <div id="loser-section" style="display: none;">
+          <p id="loser-name" class="loser-name"></p>
+        </div>
+      </section>
+
+      <section class="glass pane" data-pane="players">
+        <h2>Players</h2>
+        <ul id="players" class="player-list"></ul>
+      </section>
+
+      <section class="glass pane" data-pane="called">
+        <h2>Called numbers</h2>
+        <div id="called-numbers" class="number-grid"></div>
+      </section>
+
+      <section class="glass pane" data-pane="room" id="room-info">
+        <h2>Room</h2>
+        <div class="info-grid">
+          <p><span>Code</span><strong id="info-code">—</strong></p>
+          <p><span>Status</span><strong id="info-status">—</strong></p>
+          <p><span>Host</span><strong id="info-host">—</strong></p>
+          <p><span>Board</span><strong id="info-board-size">5 × 5</strong></p>
+        </div>
+        <label class="field field--compact">
+          <span>Board size</span>
+          <select id="board-size" class="board-size-select">
+            <option value="5">5 × 5 · Standard</option>
+            <option value="6">6 × 6 · Large</option>
+            <option value="10">10 × 10 · Epic</option>
+          </select>
+        </label>
+        <p class="hint">Only the host can change the size, before a round starts.</p>
+      </section>
+    </aside>
+
+    <aside class="glass panel--chat" id="chat-panel" aria-label="Room chat">
       <header class="chat__header">
-        <h2>Room Chat</h2>
+        <h2>Room chat</h2>
         <button id="chat-close" class="chat__close" aria-label="Close chat" type="button">&times;</button>
       </header>
       <ul id="chat-messages" class="chat__messages" aria-live="polite">
@@ -96,16 +135,21 @@
       <div id="chat-typing" class="chat__typing" aria-live="polite"></div>
       <form id="chat-form" class="chat__form" autocomplete="off">
         <input id="chat-input" maxlength="300" placeholder="Join a room to chat" disabled aria-label="Chat message" />
-        <button id="chat-send" type="submit" disabled aria-label="Send message">Send</button>
+        <button id="chat-send" class="btn btn--primary btn--icon" type="submit" disabled aria-label="Send message">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 12l16-8-6 16-2-7-8-1z" fill="currentColor"/></svg>
+        </button>
       </form>
     </aside>
   </main>
 
-  <button id="chat-toggle" class="chat-toggle" type="button" aria-controls="chat-panel" aria-expanded="false" aria-label="Open chat">
-    💬<span id="chat-badge" class="chat-toggle__badge" hidden>0</span>
+  <button id="chat-toggle" class="chat-toggle in-room-only" type="button" aria-controls="chat-panel" aria-expanded="false" aria-label="Open chat">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 5h16v11H8l-4 4V5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    <span id="chat-badge" class="chat-toggle__badge" hidden>0</span>
   </button>
   <div id="chat-backdrop" class="chat-backdrop" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <script src="/config.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="client.js" type="module"></script>
 </body>

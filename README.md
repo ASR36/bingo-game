@@ -13,14 +13,18 @@ A lightweight Bingo experience so friends on the same Wi‑Fi / LAN can join fro
 
 ## Install & Run
 
-From `E:\New folder (7)\bingo-game`:
-
-```powershell
+```bash
 npm install
-npm run dev
+npm run dev        # http://localhost:3000, restarts on change
 ```
 
-The server listens on `http://localhost:3000`. Everyone on the local network can join via `http://<your-local-ip>:3000`.
+| Script          | What it does                                   |
+| --------------- | ---------------------------------------------- |
+| `npm start`     | Start the server                               |
+| `npm run dev`   | Start with auto-restart (nodemon)              |
+| `npm test`      | Real-socket server tests                       |
+| `npm run check` | Syntax check of every JS file                  |
+| `npm run ci`    | Everything CI runs                             |
 
 ## How to Play
 
@@ -28,7 +32,8 @@ The server listens on `http://localhost:3000`. Everyone on the local network can
 2. Friends enter their names, the room code, and click **Join room** (need at least 2 players).
 3. The host chooses a board size (5×5, 6×6, or 10×10) and presses **Start round** to distribute fresh cards and shuffle the turn order.
 4. Players take **rotational turns**. When it's your turn, click a number on your card to call it. Every player who has that number gets it auto-marked.
-5. Complete lines to earn points:
+5. On phones, the board comes first; use the **Leaderboard · Players · Called · Room** tabs below it.
+6. Complete lines to earn points:
    - **1 point** for each completed line (vertical, horizontal, or diagonal “X” pattern)
    - Tiles glow when you complete a line; the server validates the claim automatically
    - Click **Declare Bingo** once you’ve completed a line to lock in your points
@@ -46,18 +51,23 @@ Every room has a live chat panel on the right side of the screen.
 - Messages are limited to 300 characters and 5 messages per 5 seconds per player (anti-spam), and are rendered as plain text (no HTML injection).
 - **Responsive:** on wide screens (≥1200px) chat is a third column; on tablets and phones it becomes a slide-in drawer opened with the 💬 button, which shows an unread-message badge.
 
-## Deploying to Render
+## Refresh-safe rooms
 
-The app runs as a single long-lived Node web service (required for Socket.IO websockets).
+Each browser tab gets a private id kept in `sessionStorage`. Refreshing the page, or losing signal, puts you straight back in your seat with the same card and marks. If you don't come back within 60 seconds you're removed from the room. The private id is never sent to other players; they only see a random public id.
 
-- `render.yaml` is included as a Blueprint: **Build** `npm install`, **Start** `npm start`, health check `/healthz`.
-- The server reads Render's `PORT` env var automatically.
-- Rooms and chat are kept in memory, so they reset when the service restarts or the free instance spins down.
+Use **Leave** to exit a room on purpose.
+
+## Branches, CI and deployment (Render, free plan)
+
+- Branches: `dev` → `uat` → `main`. Only **`main`** is deployed (production).
+- **CI** (`.github/workflows/ci.yml`) runs a syntax check and the tests on Node 20 and 22 for every push and pull request to `dev`, `uat` and `main`.
+- **CD**: Render deploys `main` only after CI passes (`autoDeployTrigger: checksPass` in `render.yaml`). Health check: `/healthz`.
+- `ARENA_URL` (optional) shows a "← Arena" link back to the Arena Games hub.
+- Rooms and chat are kept in memory, so they reset when the free instance restarts or sleeps.
 
 ## Scripts
 
-- `npm run dev` – start the server with hot reload (nodemon)
-- `npm start` – start the server once with Node
+See **Install & Run** above.
 
 ## Tech Notes
 

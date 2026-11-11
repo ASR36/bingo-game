@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "nodemon server/index.js",
     "start": "node server/index.js",
-    "build": "echo 'No build step needed'"
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check-syntax.js",
+    "ci": "npm run check && npm test"
   },
   "keywords": [],
   "author": "",
@@ -17,9 +19,10 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "nodemon": "^3.1.11",
+    "socket.io-client": "^4.8.4"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }
