@@ -217,3 +217,46 @@ test('win patterns and helpers', () => {
   assert.equal(sanitizeClientId('bad id!'), null);
   assert.ok(sanitizeClientId('good-client-id-123'));
 });
+
+// Regression: two players finishing on the same call used to be decided by
+// whichever browser reported its marks first. Now both finish together.
+test('players who finish on the same call share the place (1 v 1 is a draw)', () => {
+  const { callNumber, createPlayer, bootstrapRoom } = require('../server/index');
+  const room = bootstrapRoom('TIE1', 'p1');
+  room.status = 'running';
+  const a = createPlayer('p1', 'Ann', 5);
+  const b = createPlayer('p2', 'Ben', 5);
+  // Same card for both, so every call completes the same lines for both.
+  const card = Array.from({ length: 25 }, (_, i) => i + 1);
+  for (const p of [a, b]) {
+    p.card = card;
+    p.positions = new Map(card.map((n, i) => [n, i]));
+    room.players.set(p.id, p);
+  }
+  room.playerOrder = ['p1', 'p2'];
+  ROOMS.set(room.code, room);
+  // Rows 1-4 complete: 4 points each, one short of winning.
+  for (let n = 1; n <= 20; n++) callNumber(room, n);
+  assert.equal(room.status, 'running');
+  assert.equal(a.points, b.points);
+  assert.equal(a.points, 4);
+  callNumber(room, 21); // finishes a column (and a diagonal) on both cards at once
+  assert.equal(room.status, 'ended');
+  assert.equal(room.winners.length, 2);
+  assert.deepEqual(room.winners.map((w) => w.rank), [1, 1]);
+  assert.equal(room.draw, true);
+  assert.equal(room.loser, null);
+  ROOMS.delete(room.code);
+});
+
+test('marks sent by a browser can no longer score points', async () => {
+  const a = client();
+  const b = client();
+  const created = await emit(a, 'createRoom', { name: 'Cheat', clientId: cid('a') });
+  await emit(b, 'joinRoom', { name: 'Fair', roomCode: created.room.code, clientId: cid('b') });
+  await emit(a, 'startGame', { roomCode: created.room.code });
+  a.emit('updateMarkedNumbers', { roomCode: created.room.code, markedNumbers: Array.from({ length: 25 }, (_, i) => i + 1) });
+  await wait(50);
+  const room = ROOMS.get(created.room.code);
+  assert.ok([...room.players.values()].every((p) => p.points === 0 && p.marked.size === 0));
+});

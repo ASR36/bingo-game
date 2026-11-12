@@ -292,17 +292,19 @@ socket.on('room:pointsEarned', ({ player, points, linesCompleted }) => {
   setStatus(`${player} earned ${linesCompleted} point(s)! Total: ${points}/5`, false);
 });
 
-socket.on('room:gameEnded', ({ winner, loser, winners: winnerList }) => {
-  if (loser) {
-    setStatus(`Game Over! .`, false);
-  } else if (winner) {
-    // This might be a legacy event or single winner case, but we handle multi-winner via room:playerWon
-    setStatus(`${winner} finished!`, false);
+socket.on('room:gameEnded', ({ loser, draw, winners: winnerList }) => {
+  if (draw) {
+    const names = (winnerList || []).map((w) => w.name).join(' & ');
+    setStatus(`It's a draw — ${names} finished on the same call.`, false);
+  } else if (loser) {
+    setStatus(`Game over. ${loser} is last standing.`, false);
+  } else {
+    setStatus('Game over.', false);
   }
 });
 
-socket.on('room:playerWon', ({ player, rank }) => {
-  setStatus(`${player} finished #${rank}!`, false);
+socket.on('room:playerWon', ({ player, rank, tie }) => {
+  setStatus(tie ? `${player} finished together — shared #${rank}!` : `${player} finished #${rank}!`, false);
 });
 
 socket.on('room:hostChanged', (name) => {
@@ -755,7 +757,7 @@ function renderInfo() {
     elements.turnIndicator.style.display = 'block';
     elements.turnIndicator.style.color = '#8b8d98';
   } else if (room?.status === 'ended') {
-    elements.turnIndicator.textContent = 'Game over — see the leaderboard';
+    elements.turnIndicator.textContent = room.draw ? 'Draw — finished on the same call' : 'Game over — see the leaderboard';
     elements.turnIndicator.style.display = 'block';
     elements.turnIndicator.style.color = '#ededef';
   } else {
@@ -859,14 +861,14 @@ function renderWinners() {
 
     const rankEl = document.createElement('span');
     rankEl.className = 'lb-row__rank';
-    rankEl.textContent = index + 1;
+    rankEl.textContent = rank ?? index + 1;
 
     const name = document.createElement('span');
     name.className = 'lb-row__name';
     name.textContent = `${player.name}${player.id === state.playerId ? ' (you)' : ''}`;
     const tag = document.createElement('span');
     tag.className = 'lb-row__tag';
-    tag.textContent = rank ? `Finished #${rank}` : isLoser ? 'Last standing' : player.isCurrentTurn ? (player.id === state.playerId ? 'Your turn' : 'Their turn') : '';
+    tag.textContent = rank ? (room?.draw ? 'Draw' : (room.winners.filter((w) => w.rank === rank).length > 1 ? `Shared #${rank}` : `Finished #${rank}`)) : isLoser ? 'Last standing' : player.isCurrentTurn ? (player.id === state.playerId ? 'Your turn' : 'Their turn') : '';
     if (tag.textContent) name.appendChild(tag);
 
     const pts = document.createElement('span');

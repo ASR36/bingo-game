@@ -37,7 +37,7 @@ npm run dev        # http://localhost:3000, restarts on change
    - **1 point** for each completed line (vertical, horizontal, or diagonal “X” pattern)
    - Tiles glow when you complete a line; the server validates the claim automatically
    - Click **Declare Bingo** once you’ve completed a line to lock in your points
-6. **Win condition**: First player to reach **5 points wins**!
+6. **Win condition**: First player to reach **5 points wins**! The server marks every card the moment a number is called, so if two or more players reach 5 points on the **same call** they finish together and share the place (in a 1 v 1 that is a draw).
 7. **Lose condition**: Last player standing (if others drop out) loses.
 8. The host can **remove disruptive players**, **change board size** between rounds, and **reset** whenever they’re ready for the next game.
 

@@ -19,6 +19,7 @@ const CHAT_RATE_MAX = 5;
 const BOT_LEVELS = ['easy', 'medium', 'hard'];
 const BOT_NAMES = ['Bolt', 'Pixel', 'Nova'];
 const BOT_DELAY_MS = Number(process.env.BOT_DELAY_MS) || 1200;
+const WIN_POINTS = 5;
 const RECONNECT_GRACE_MS = Number(process.env.RECONNECT_GRACE_MS) || 60_000;
 
 // Link back to the Arena hub (set ARENA_URL on Render).
@@ -178,6 +179,7 @@ io.on('connection', (socket) => {
     room.playerOrder = Array.from(room.players.keys());
     room.currentTurnIndex = 0;
     room.loser = null;
+    room.draw = false;
     room.status = 'waiting';
 
     for (const player of room.players.values()) {
@@ -280,18 +282,12 @@ io.on('connection', (socket) => {
     callback?.({ ok: true, number: numeric });
   });
 
-  socket.on('updateMarkedNumbers', ({ roomCode, markedNumbers }) => {
-    const code = normalizeCode(roomCode);
-    if (!code) return;
-    const room = ROOMS.get(code);
-    if (!room || room.status !== 'running') return;
-    if (!room.players.has(keyOf())) return;
-
-    const player = room.players.get(keyOf());
-    if (!player || player.isEliminated || player.hasWon) return;
-
-    applyMarks(room, player, markedNumbers);
-    broadcastRoom(room.code);
+  // Kept for older clients. Marks are set by the server when a number is called,
+  // so this only re-sends the current state and can never score or win a game.
+  socket.on('updateMarkedNumbers', ({ roomCode } = {}) => {
+    const room = ROOMS.get(normalizeCode(roomCode));
+    if (!room || !room.players.has(keyOf())) return;
+    socket.emit('room:update', serializeRoom(room));
   });
 
   socket.on('resetGame', ({ roomCode }, callback) => {
@@ -394,68 +390,60 @@ io.on('connection', (socket) => {
 });
 
 // Records a player's marks and awards points for newly completed lines.
-// Shared by people (who send their marks) and computer players (marked by the server).
+// Returns true when the player has just reached the winning score; the caller
+// settles every finisher of the same call together (see settleFinishers).
 function applyMarks(room, player, markedNumbers) {
   const winPatterns = room.winPatterns || getWinPatterns(room.boardSize || 5);
 
-  // Update player's marked numbers (only called numbers can be marked)
+  // Only called numbers on the player's own card can be marked.
   const calledSet = new Set(room.calledNumbers);
   const validMarks = (Array.isArray(markedNumbers) ? markedNumbers : [...markedNumbers || []]).filter(
     (n) => player.positions.has(n) && calledSet.has(n)
   );
   player.marked = new Set(validMarks);
 
-  // Check for newly completed lines (Auto-Scoring)
-  const markIndices = validMarks.map((n) => player.positions.get(n));
-  const markSet = new Set(markIndices);
+  const markSet = new Set(validMarks.map((n) => player.positions.get(n)));
   const newLines = checkNewLines(player, markSet, winPatterns);
+  if (!newLines.length) return false;
 
-  if (newLines.length > 0) {
-    player.points += newLines.length;
-    newLines.forEach(lineIndex => player.completedLines.add(lineIndex));
+  player.points += newLines.length;
+  newLines.forEach((lineIndex) => player.completedLines.add(lineIndex));
+  io.to(room.code).emit('room:pointsEarned', {
+    player: player.name,
+    points: player.points,
+    linesCompleted: newLines.length,
+  });
+  return player.points >= WIN_POINTS && !player.hasWon;
+}
 
-    io.to(room.code).emit('room:pointsEarned', {
-      player: player.name,
-      points: player.points,
-      linesCompleted: newLines.length
-    });
+// Everyone who reached the winning score on the same call finishes together and
+// shares the same place. Network timing never decides who won.
+function settleFinishers(room, finishers) {
+  if (!finishers.length) return;
+  const rank = room.winners.length + 1;
+  const now = Date.now();
+  for (const player of finishers) {
+    player.hasWon = true;
+    room.winners.push({ id: player.publicId, name: player.name, rank, points: player.points, timestamp: now });
+  }
+  io.to(room.code).emit('room:playerWon', {
+    player: finishers.map((p) => p.name).join(' & '),
+    players: finishers.map((p) => p.name),
+    rank,
+    tie: finishers.length > 1,
+    winners: room.winners,
+  });
 
-    // Check for win condition (5 points)
-    if (player.points >= 5 && !player.hasWon) {
-      player.hasWon = true;
-      const rank = room.winners.length + 1;
-      room.winners.push({
-        id: player.publicId,
-        name: player.name,
-        rank,
-        timestamp: Date.now()
-      });
-
-      io.to(room.code).emit('room:playerWon', {
-        player: player.name,
-        rank,
-        winners: room.winners
-      });
-
-      // Check if game should end (only 1 player left)
-      const activePlayers = room.playerOrder.filter(
-        (id) => room.players.has(id) && !room.players.get(id).isEliminated && !room.players.get(id).hasWon
-      );
-
-      if (activePlayers.length <= 1) {
-        // Game Over
-        const loserId = activePlayers[0];
-        const loser = room.players.get(loserId);
-        if (loser) {
-          room.loser = { id: loser.publicId, name: loser.name };
-        }
-        room.status = 'ended';
-        io.to(room.code).emit('room:gameEnded', {
-          loser: loser?.name,
-          winners: room.winners
-        });
-      }
-    }
+  const active = room.playerOrder.filter(
+    (id) => room.players.has(id) && !room.players.get(id).isEliminated && !room.players.get(id).hasWon
+  );
+  if (active.length <= 1) {
+    const loser = active.length === 1 ? room.players.get(active[0]) : null;
+    room.loser = loser ? { id: loser.publicId, name: loser.name } : null;
+    room.draw = !loser && room.winners.every((w) => w.rank === 1);
+    room.status = 'ended';
+    clearTimeout(room.botTimer);
+    io.to(room.code).emit('room:gameEnded', { loser: loser?.name, draw: room.draw, winners: room.winners });
   }
 }
 
@@ -488,11 +476,14 @@ function startRound(room) {
 function callNumber(room, number) {
   room.calledNumbers.push(number);
   io.to(room.code).emit('number:called', number);
-  for (const bot of room.players.values()) {
-    if (bot.isBot && !bot.hasWon && bot.positions.has(number)) {
-      applyMarks(room, bot, [...bot.marked, number]);
-    }
+  // The server marks every card (people and computer players alike) in one pass,
+  // then settles all players who finished on this call at the same time.
+  const finishers = [];
+  for (const player of room.players.values()) {
+    if (player.hasWon || player.isEliminated || !player.positions.has(number)) continue;
+    if (applyMarks(room, player, [...player.marked, number])) finishers.push(player);
   }
+  settleFinishers(room, finishers);
   if (room.status === 'running') advanceTurn(room);
   broadcastRoom(room.code);
   scheduleBotTurn(room);
@@ -561,6 +552,7 @@ function resetRoom(room) {
   room.playerOrder = [];
   room.currentTurnIndex = 0;
   room.loser = null;
+  room.draw = false;
   for (const player of room.players.values()) {
     player.marked = new Set();
     player.points = 0;
@@ -801,6 +793,7 @@ function serializeRoom(room) {
     calledNumbers: room.calledNumbers,
     winners: room.winners,
     loser: room.loser,
+    draw: Boolean(room.draw),
     players: Array.from(room.players.values()).map((player) => ({
       id: player.publicId,
       name: player.name,
@@ -906,4 +899,4 @@ function leaveCurrentRoom(socket) {
   removePlayerFromRoom(room, key, 'Player left');
 }
 
-module.exports = { app, httpServer, io, ROOMS, chooseBotNumber, buildWinPatterns, sanitizeName, normalizeCode, sanitizeClientId };
+module.exports = { app, callNumber, createPlayer, bootstrapRoom, startRound, httpServer, io, ROOMS, chooseBotNumber, buildWinPatterns, sanitizeName, normalizeCode, sanitizeClientId };
