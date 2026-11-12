@@ -515,7 +515,7 @@ function renderChat() {
   if (!state.chat.length) {
     const empty = document.createElement('li');
     empty.className = 'chat__empty';
-    empty.textContent = state.room ? 'No messages yet. Say hi! 👋' : 'Join a room to start chatting.';
+    empty.textContent = state.room ? 'No messages yet.' : 'Join a room to start chatting.';
     list.appendChild(empty);
     return;
   }
@@ -584,8 +584,14 @@ function handleAck(response) {
       elements.roomCode.value = response.room.code;
       saveSession(response.room.code);
       if (response.resumed) toast('Welcome back — you’re still in the game.');
+      // Re-render everything now that we know which player we are: a room update can
+      // arrive before this reply (e.g. a computer game starts instantly), and without
+      // this the board would stay locked on our first turn.
       renderInfo();
       renderPlayers();
+      renderWinners();
+      renderCalledNumbers();
+      renderCard();
       updateControls();
       updateChatControls();
       if (!state.chat.length) renderChat();
@@ -710,7 +716,7 @@ function toggleMark(number) {
 function renderInfo() {
   const room = state.room;
   elements.infoCode.textContent = room?.code ?? '—';
-  elements.topCode.textContent = room?.vsComputer ? `vs 🤖 ${room.botLevel || ''}` : room?.code ?? '—';
+  elements.topCode.textContent = room?.vsComputer ? `vs Computer · ${room.botLevel ? room.botLevel[0].toUpperCase() + room.botLevel.slice(1) : ''}` : room?.code ?? '—';
   document.body.classList.toggle('is-bot-game', Boolean(room?.vsComputer));
   elements.playersCount.textContent = room ? String(room.players.length) : '';
   elements.calledCount.textContent = room?.calledNumbers?.length ? String(room.calledNumbers.length) : '';
@@ -729,12 +735,12 @@ function renderInfo() {
       const isMyTurn = room.currentPlayerId === state.playerId;
       const points = currentPlayer.points || 0;
       elements.turnIndicator.textContent = isMyTurn
-        ? `🎯 Your turn — tap a number to call it (${points}/5)`
+        ? `Your turn — tap a number to call it · ${points}/5`
         : currentPlayer.isBot
           ? `${currentPlayer.name} is thinking… · ${points}/5`
-          : `${currentPlayer.connected === false ? '⏳' : '👤'} ${currentPlayer.name}'s turn${currentPlayer.connected === false ? ' (reconnecting…)' : ''} · ${points}/5`;
+          : `${currentPlayer.name}'s turn${currentPlayer.connected === false ? ' (reconnecting…)' : ''} · ${points}/5`;
       elements.turnIndicator.style.display = 'block';
-      elements.turnIndicator.style.color = isMyTurn ? '#e6c27a' : '#f5efe4';
+      elements.turnIndicator.style.color = isMyTurn ? '#b9b7ff' : '#ededef';
     }
   } else if (room?.status === 'waiting') {
     const isHost = room.hostId === state.playerId;
@@ -747,11 +753,11 @@ function renderInfo() {
           ? `${room.players.length} players ready — press Start round`
           : 'Waiting for the host to start';
     elements.turnIndicator.style.display = 'block';
-    elements.turnIndicator.style.color = '#b3a99a';
+    elements.turnIndicator.style.color = '#8b8d98';
   } else if (room?.status === 'ended') {
-    elements.turnIndicator.textContent = '🏁 Game over — see the leaderboard';
+    elements.turnIndicator.textContent = 'Game over — see the leaderboard';
     elements.turnIndicator.style.display = 'block';
-    elements.turnIndicator.style.color = '#e6c27a';
+    elements.turnIndicator.style.color = '#ededef';
   } else {
     elements.turnIndicator.style.display = 'none';
   }
@@ -784,8 +790,8 @@ function renderPlayers() {
     const parts = [];
     if (player.isBot) parts.push('Computer');
     if (player.isHost) parts.push('Host');
-    if (player.isCurrentTurn) parts.push('🎯 Turn');
-    if (player.hasWon) parts.push('🏆 Won');
+    if (player.isCurrentTurn) parts.push('Turn');
+    if (player.hasWon) parts.push('Finished');
     if (player.isEliminated) parts.push('Out');
     if (player.connected === false) parts.push('Reconnecting');
     const metaSpan = document.createElement('span');
@@ -845,7 +851,6 @@ function renderWinners() {
     return;
   }
 
-  const medals = ['🥇', '🥈', '🥉'];
   players.forEach((player, index) => {
     const rank = rankOf.get(player.id);
     const isLoser = room?.loser?.id === player.id;
@@ -854,7 +859,7 @@ function renderWinners() {
 
     const rankEl = document.createElement('span');
     rankEl.className = 'lb-row__rank';
-    rankEl.textContent = rank ? medals[rank - 1] || `#${rank}` : index + 1;
+    rankEl.textContent = index + 1;
 
     const name = document.createElement('span');
     name.className = 'lb-row__name';
@@ -974,7 +979,7 @@ function buildWinPatterns(size) {
 function setStatus(message, isError = false) {
   if (elements.status) {
     elements.status.textContent = message;
-    elements.status.style.color = isError ? '#f3b8b8' : '#e6c27a';
+    elements.status.style.color = isError ? '#e5484d' : '#8b8d98';
   }
   // In a room the lobby form is hidden, so show messages as a toast instead.
   if (state.room && message) toast(message, isError);

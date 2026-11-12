@@ -17,7 +17,7 @@ const CHAT_MAX_LENGTH = 300;
 const CHAT_RATE_WINDOW_MS = 5000;
 const CHAT_RATE_MAX = 5;
 const BOT_LEVELS = ['easy', 'medium', 'hard'];
-const BOT_NAMES = ['Bolt 🤖', 'Pixel 🤖', 'Nova 🤖'];
+const BOT_NAMES = ['Bolt', 'Pixel', 'Nova'];
 const BOT_DELAY_MS = Number(process.env.BOT_DELAY_MS) || 1200;
 const RECONNECT_GRACE_MS = Number(process.env.RECONNECT_GRACE_MS) || 60_000;
 
