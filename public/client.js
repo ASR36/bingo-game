@@ -77,6 +77,42 @@ const elements = {
   calledCount: document.getElementById('called-count'),
 };
 
+/* ---------------- Dialog ---------------- */
+// One styled dialog for every question, instead of the browser's confirm() and alert().
+// ask() resolves true when confirmed; Escape, Cancel and a click outside resolve false.
+const dialogEl = document.getElementById('dialog');
+let dialogResolve = null;
+function ask({ title, body = '', confirm = 'OK', cancel = 'Cancel', danger = false }) {
+  if (dialogResolve) dialogResolve(false);
+  document.getElementById('dialog-title').textContent = title;
+  const bodyEl = document.getElementById('dialog-body');
+  bodyEl.textContent = body;
+  bodyEl.hidden = !body;
+  const ok = document.getElementById('dialog-ok');
+  ok.textContent = confirm;
+  ok.classList.toggle('btn--danger', danger);
+  const cancelEl = document.getElementById('dialog-cancel');
+  cancelEl.textContent = cancel || '';
+  cancelEl.hidden = !cancel;
+  dialogEl.returnValue = '';
+  dialogEl.showModal();
+  ok.focus();
+  return new Promise((resolve) => {
+    dialogResolve = resolve;
+  });
+}
+function notify(title, body = '') {
+  return ask({ title, body, confirm: 'OK', cancel: null });
+}
+dialogEl.addEventListener('close', () => {
+  const resolve = dialogResolve;
+  dialogResolve = null;
+  resolve?.(dialogEl.returnValue === 'ok');
+});
+dialogEl.addEventListener('click', (e) => {
+  if (e.target === dialogEl) dialogEl.close('cancel');
+});
+
 /* ---------------- Boot ---------------- */
 if (window.APP_CONFIG?.arenaUrl) {
   elements.arenaLink.href = window.APP_CONFIG.arenaUrl;
@@ -103,8 +139,12 @@ elements.roomCode.addEventListener('input', () => {
 elements.roomCode.addEventListener('keydown', (e) => e.key === 'Enter' && elements.joinRoom.click());
 elements.name.addEventListener('keydown', (e) => e.key === 'Enter' && (elements.roomCode.value ? elements.joinRoom : elements.createRoom).click());
 
-elements.leaveRoom.addEventListener('click', () => {
-  if (!confirm('Leave this room?')) return;
+elements.leaveRoom.addEventListener('click', async () => {
+  const body = state.room?.vsComputer
+    ? 'This game against the computer will end.'
+    : 'You can come back with the room code while the room is open.';
+  const ok = await ask({ title: state.room?.vsComputer ? 'Leave this game?' : 'Leave this room?', body, confirm: 'Leave', danger: true });
+  if (!ok) return;
   socket.emit('leaveRoom', {}, () => {});
   clearSession();
   window.location.reload();
@@ -315,14 +355,14 @@ socket.on('connect_error', () => {
   setStatus('Unable to reach server. Make sure it is running.', true);
 });
 
-socket.on('player:kicked', (reason) => {
+socket.on('player:kicked', async (reason) => {
   clearSession();
-  alert(reason || 'You were removed from the room by the host.');
+  await notify('Removed from the room', reason || 'The host removed you from the room.');
   window.location.reload();
 });
 
-socket.on('player:replaced', () => {
-  alert('This game was opened in another tab.');
+socket.on('player:replaced', async () => {
+  await notify('Opened in another tab', 'This game is now open in another tab, so this one will reload.');
   clearSession();
   window.location.reload();
 });
@@ -441,8 +481,7 @@ socket.on('connect', () => {
     } else {
       clearSession();
       if (state.room) {
-        alert('Your seat in the room has expired.');
-        window.location.reload();
+        notify('Your seat expired', 'You were away for too long, so your seat was given up.').then(() => window.location.reload());
       }
     }
   });
@@ -806,8 +845,14 @@ function renderPlayers() {
       const removeBtn = document.createElement('button');
       removeBtn.className = 'player-remove';
       removeBtn.textContent = 'Remove';
-      removeBtn.addEventListener('click', () => {
-        if (confirm(`Remove ${player.name} from the room?`)) removePlayer(player.id);
+      removeBtn.addEventListener('click', async () => {
+        const ok = await ask({
+          title: `Remove ${player.name}?`,
+          body: player.isBot ? 'The computer player leaves the room.' : 'They will be taken out of the room.',
+          confirm: 'Remove',
+          danger: true,
+        });
+        if (ok) removePlayer(player.id);
       });
       li.appendChild(removeBtn);
     }

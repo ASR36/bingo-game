@@ -171,6 +171,17 @@
   </button>
   <div id="chat-backdrop" class="chat-backdrop" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <!-- In-game dialog (replaces the browser's confirm/alert) -->
+  <dialog id="dialog" class="dialog" aria-labelledby="dialog-title" aria-describedby="dialog-body">
+    <form method="dialog" class="dialog__panel">
+      <h2 id="dialog-title" class="dialog__title"></h2>
+      <p id="dialog-body" class="dialog__body"></p>
+      <div class="dialog__actions">
+        <button id="dialog-cancel" class="btn" value="cancel" type="submit">Cancel</button>
+        <button id="dialog-ok" class="btn btn--primary" value="ok" type="submit">OK</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/config.js"></script>
   <script src="/socket.io/socket.io.js"></script>
